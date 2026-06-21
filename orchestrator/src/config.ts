@@ -10,10 +10,13 @@ export const config = {
   tribunalContractHash: process.env.TRIBUNAL_CONTRACT_HASH ?? "",
   csprCloudKey: process.env.CSPR_CLOUD_KEY ?? "",
 
-  // GenLayer
-  genlayerChain: process.env.GENLAYER_CHAIN ?? "studionet",
-  genlayerEndpoint: process.env.GENLAYER_ENDPOINT ?? "",
+  // public no-auth Casper node the GenLayer judge reads from (validators can't reach our proxy)
+  casperPublicNodeUrl: process.env.CASPER_PUBLIC_NODE_URL ?? "https://node.testnet.casper.network/rpc",
+
+  // GenLayer (network names: localnet | studionet | testnet-asimov | testnet-bradbury)
+  genlayerNetwork: process.env.GENLAYER_NETWORK ?? "studionet",
   genlayerDeployerKey: process.env.GENLAYER_DEPLOYER_PRIVATE_KEY ?? "",
+  genlayerSolvencyJudge: process.env.GENLAYER_SOLVENCY_JUDGE ?? "",
 } as const;
 
 export function requireEnv(name: keyof typeof config): string {
