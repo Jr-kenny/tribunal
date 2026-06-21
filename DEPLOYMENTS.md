@@ -34,7 +34,18 @@ to the right equivalence rule for its source:
 
 The relay routes every GenLayer RPC call through a retry wrapper, since studionet
 throws transient connect-timeouts under load; a blip now retries instead of
-crashing a panel run.
+crashing a panel run. The get_* views are polled tolerantly too: GenLayer has
+read-after-write lag, so a verdict/reserve/price read retries through the brief
+"not committed yet" window instead of failing.
+
+### Per-judge Casper identities (reputation per judge)
+
+Each facet judge has its own Casper key (funded ~50 CSPR from the deployer, no
+faucet; registered via `register_judge`), so its verdict accrues reputation under
+its own address rather than all four sharing the deployer key. Keys live in the
+gitignored `.keys/casper/judges/`; regenerate/register with
+`orchestrator/scripts/setup-judge-keys.mjs`. Verified on claim 12: each
+`submit_verdict` was signed by its own judge key, none by the deployer.
 
 ### Full four-judge panel run (claim 8, unbacked example)
 

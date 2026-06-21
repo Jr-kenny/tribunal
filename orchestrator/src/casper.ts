@@ -17,9 +17,9 @@ const VOTE_DISCRIMINANT: Record<Vote, number> = { PASS: 0, FAIL: 1, UNCERTAIN: 2
 // generous per-call gas, well under the block gas limit (installs ran ~hundreds of CSPR)
 const CALL_PAYMENT = 6_000_000_000;
 
-function loadKey(): PrivateKey {
-  if (!config.casperSecretKeyPath) throw new Error("Missing CASPER_SECRET_KEY path");
-  const pem = readFileSync(config.casperSecretKeyPath, "utf8");
+function loadKey(keyPath: string = config.casperSecretKeyPath): PrivateKey {
+  if (!keyPath) throw new Error("Missing Casper key path");
+  const pem = readFileSync(keyPath, "utf8");
   return C.PrivateKey.fromPem(pem, C.KeyAlgorithm.ED25519);
 }
 
@@ -32,8 +32,8 @@ function packageHashHex(): string {
   return config.tribunalContractHash.replace(/^hash-/, "");
 }
 
-async function call(entryPoint: string, args: Args): Promise<string> {
-  const key = loadKey();
+async function call(entryPoint: string, args: Args, keyPath?: string): Promise<string> {
+  const key = loadKey(keyPath);
   const tx = new C.ContractCallBuilder()
     .byPackageHash(packageHashHex())
     .entryPoint(entryPoint)
@@ -59,6 +59,7 @@ export async function submitVerdict(
   vote: Vote,
   confidenceBps: number,
   genlayerProof: string,
+  judgeKeyPath?: string,
 ): Promise<string> {
   const args = C.Args.fromMap({
     claim_id: C.CLValue.newCLUint64(claimId),
@@ -67,7 +68,8 @@ export async function submitVerdict(
     confidence: C.CLValue.newCLUInt32(confidenceBps),
     genlayer_proof: C.CLValue.newCLString(genlayerProof),
   });
-  return call("submit_verdict", args);
+  // signed by the facet's own judge key so reputation accrues per judge
+  return call("submit_verdict", args, judgeKeyPath);
 }
 
 /** Federate the submitted verdicts into the on-chain outcome. */

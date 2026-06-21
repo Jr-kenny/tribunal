@@ -15,6 +15,8 @@ export interface FacetSpec {
   facetId: number;
   critical: boolean;
   judge: string;
+  // this facet's own Casper key, so its verdict accrues reputation per judge
+  casperKey: string;
   // each facet that verifies external/on-chain truth fetches it under consensus first:
   readsReserve?: boolean; // solvency: reserve balance off Casper
   readsPrice?: boolean; // valuation: live market price
@@ -23,11 +25,12 @@ export interface FacetSpec {
 }
 
 // facet ids match the Tribunal contract's configured ids (see judges/rubrics.py)
+const JUDGE_KEY = (facet: string) => `../.keys/casper/judges/${facet}.pem`;
 export const FACETS: FacetSpec[] = [
-  { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge, readsAttestation: true },
-  { key: "solvency", facetId: 2, critical: true, judge: config.genlayerSolvencyJudge, readsReserve: true },
-  { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge, readsCustodian: true },
-  { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, readsPrice: true },
+  { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge, casperKey: JUDGE_KEY("authenticity"), readsAttestation: true },
+  { key: "solvency", facetId: 2, critical: true, judge: config.genlayerSolvencyJudge, casperKey: JUDGE_KEY("solvency"), readsReserve: true },
+  { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge, casperKey: JUDGE_KEY("custodian"), readsCustodian: true },
+  { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, casperKey: JUDGE_KEY("valuation"), readsPrice: true },
 ];
 
 export interface FacetResult {
@@ -91,8 +94,8 @@ export async function judgeFacet(spec: FacetSpec, claimId: number, evidence: str
   const verdict = await readVerdict(spec.judge, String(claimId));
   console.log(`[${spec.key}] ${verdict.vote} @ ${verdict.confidence}bps - ${verdict.reason}`);
 
-  const submitTx = await submitVerdict(claimId, spec.facetId, verdict.vote, verdict.confidence, genlayerTx);
-  console.log(`[${spec.key}] submitted to Casper, tx ${submitTx}`);
+  const submitTx = await submitVerdict(claimId, spec.facetId, verdict.vote, verdict.confidence, genlayerTx, spec.casperKey);
+  console.log(`[${spec.key}] submitted to Casper (own key), tx ${submitTx}`);
 
   return {
     facet: spec.key,

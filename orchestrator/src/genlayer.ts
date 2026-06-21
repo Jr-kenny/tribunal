@@ -71,6 +71,24 @@ const rpcWait = (client: ReturnType<typeof makeClient>, params: any) =>
 const rpcRead = (client: ReturnType<typeof makeClient>, params: any) =>
   withRetry("readContract", () => client.readContract(params));
 
+// The get_* views raise "[EXPECTED] no <thing>" until the matching write is
+// visible to reads (GenLayer has read-after-write lag against latest-nonfinal
+// state). Poll, treating that raise (and transient blips) as "not ready yet".
+async function pollRead(client: ReturnType<typeof makeClient>, params: any, tries = 24): Promise<unknown> {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    try {
+      const raw = await rpcRead(client, params);
+      if (raw) return raw;
+    } catch (e) {
+      const blob = `${(e as Error)?.message ?? ""} ${JSON.stringify(e)?.slice(0, 400) ?? ""}`;
+      const notReady = /execution failed|EXPECTED|no verdict|no reserve|no price|no custodian|no attestation|not found|Missing or invalid/i.test(blob);
+      if (!notReady) throw e;
+    }
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+  throw new Error(`read not available after ${tries} polls: ${params.functionName}`);
+}
+
 /** Run the judge on a claim and return the GenLayer tx hash (the on-chain proof). */
 export async function runJudge(judgeAddress: string, claimId: string, evidence: string): Promise<string> {
   const client = makeClient();
@@ -87,16 +105,12 @@ export async function runJudge(judgeAddress: string, claimId: string, evidence: 
 /** Read the verdict the judge stored, retrying while it settles to accepted state. */
 export async function readVerdict(judgeAddress: string, claimId: string): Promise<Verdict> {
   const client = makeClient();
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const raw = await rpcRead(client, {
-      address: judgeAddress as `0x${string}`,
-      functionName: "get_verdict",
-      args: [claimId],
-    });
-    if (raw) return JSON.parse(raw as string) as Verdict;
-    await new Promise((r) => setTimeout(r, 5_000));
-  }
-  throw new Error(`No verdict for claim ${claimId} after retries`);
+  const raw = await pollRead(client, {
+    address: judgeAddress as `0x${string}`,
+    functionName: "get_verdict",
+    args: [claimId],
+  });
+  return JSON.parse(raw as string) as Verdict;
 }
 
 /** Make the judge fetch a live USD market price under consensus, returning micro-USD. */
@@ -113,16 +127,12 @@ export async function readPrice(
     value: 0n,
   });
   await rpcWait(client, { hash: txHash, ...ACCEPTED });
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const raw = await rpcRead(client, {
-      address: judgeAddress as `0x${string}`,
-      functionName: "get_price",
-      args: [claimId],
-    });
-    if (raw) return BigInt(raw as string);
-    await new Promise((r) => setTimeout(r, 5_000));
-  }
-  throw new Error(`No price read for claim ${claimId} after retries`);
+  const raw = await pollRead(client, {
+    address: judgeAddress as `0x${string}`,
+    functionName: "get_price",
+    args: [claimId],
+  });
+  return BigInt(raw as string);
 }
 
 /** Make the judge look the custodian up in a public knowledge source under consensus. */
@@ -139,16 +149,11 @@ export async function readCustodian(
     value: 0n,
   });
   await rpcWait(client, { hash: txHash, ...ACCEPTED });
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const raw = await rpcRead(client, {
-      address: judgeAddress as `0x${string}`,
-      functionName: "get_custodian",
-      args: [claimId],
-    });
-    if (raw) return raw as string;
-    await new Promise((r) => setTimeout(r, 5_000));
-  }
-  throw new Error(`No custodian lookup for claim ${claimId} after retries`);
+  return (await pollRead(client, {
+    address: judgeAddress as `0x${string}`,
+    functionName: "get_custodian",
+    args: [claimId],
+  })) as string;
 }
 
 /** Make the judge fetch the attestation document and verify its SHA-256 under consensus. */
@@ -166,16 +171,11 @@ export async function readAttestation(
     value: 0n,
   });
   await rpcWait(client, { hash: txHash, ...ACCEPTED });
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const raw = await rpcRead(client, {
-      address: judgeAddress as `0x${string}`,
-      functionName: "get_attestation",
-      args: [claimId],
-    });
-    if (raw) return raw as string;
-    await new Promise((r) => setTimeout(r, 5_000));
-  }
-  throw new Error(`No attestation check for claim ${claimId} after retries`);
+  return (await pollRead(client, {
+    address: judgeAddress as `0x${string}`,
+    functionName: "get_attestation",
+    args: [claimId],
+  })) as string;
 }
 
 /** Cross-chain read: make the judge fetch a Casper reserve balance under consensus. */
@@ -193,14 +193,10 @@ export async function readReserve(
     value: 0n,
   });
   await rpcWait(client, { hash: txHash, ...ACCEPTED });
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const raw = await rpcRead(client, {
-      address: judgeAddress as `0x${string}`,
-      functionName: "get_reserve",
-      args: [claimId],
-    });
-    if (raw) return BigInt(raw as string);
-    await new Promise((r) => setTimeout(r, 5_000));
-  }
-  throw new Error(`No reserve read for claim ${claimId} after retries`);
+  const raw = await pollRead(client, {
+    address: judgeAddress as `0x${string}`,
+    functionName: "get_reserve",
+    args: [claimId],
+  });
+  return BigInt(raw as string);
 }
