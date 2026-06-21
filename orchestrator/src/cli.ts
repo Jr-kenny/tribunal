@@ -1,14 +1,40 @@
 // Tribunal relay CLI.
+//   claim <evidence>                  -> open + run the full panel + read the final status, all from chain
 //   open                              -> open a new claim on Casper (note the sequential id)
 //   relay <claimId> <evidence>        -> run the full panel (all configured judges) and finalize
 //   relay-facet <facet> <id> <ev>     -> run one named facet (authenticity|solvency|custodian|valuation)
 import { readFileSync } from "node:fs";
 import { openClaim } from "./casper.js";
 import { relayPanel, relayFacet } from "./orchestrate.js";
+import { confirm, claimIdFromOpen, statusFromDiff } from "./chainread.js";
 
 const cmd = process.argv[2];
 
-if (cmd === "open") {
+if (cmd === "claim") {
+  const evidencePath = process.argv[3];
+  if (!evidencePath) {
+    console.error("usage: tsx src/cli.ts claim <evidence.json>");
+    process.exit(1);
+  }
+  const evidence = readFileSync(evidencePath, "utf8");
+  const openTx = await openClaim();
+  const openInfo = await confirm(openTx);
+  const claimId = claimIdFromOpen(openInfo);
+  console.log(`opened claim ${claimId} (tx ${openTx})\n`);
+
+  const result = await relayPanel(claimId, evidence);
+  for (const f of result.facets) await confirm(f.submitTx);
+  const finalizeInfo = await confirm(result.finalizeTx);
+  const status = statusFromDiff(openInfo, finalizeInfo);
+
+  console.log("\n=== claim resolved ===");
+  console.log(JSON.stringify({
+    claimId,
+    facets: result.facets.map((f) => ({ facet: f.facet, vote: f.vote, conf: f.confidence })),
+    status,
+    finalizeTx: result.finalizeTx,
+  }, null, 2));
+} else if (cmd === "open") {
   const tx = await openClaim();
   console.log("open_claim tx:", tx);
   console.log("note: claim ids are sequential; use the next unused id for `relay`.");

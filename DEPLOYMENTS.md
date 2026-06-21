@@ -35,7 +35,21 @@ executed cleanly; final status read from chain (claim_status 00 Open -> 03 NotBa
 
 - authenticity UNCERTAIN @ 8200, solvency FAIL @ 9900, custodian UNCERTAIN @ 9500, valuation FAIL @ 9500
 - finalize tx: `78ca71ea97c9f5e5b39112c82ac650c1d2b975ccc39f2b3aa83246fc3a9790db`
-- outcome: NotBacked (critical solvency FAIL, weighted 4950 >= 4000 veto threshold)
+- outcome: NotBacked (Pass 1 critical veto: solvency FAIL weighted 4950 >= 4000)
+
+### Full four-judge panel run (claim 5, backed example)
+
+A CSPR-collateralized note whose on-chain reserve genuinely covers it:
+
+- authenticity UNCERTAIN @ 9500 (plain-text attestation, no signature to verify),
+  solvency PASS @ 9000 (2671 CSPR read live >= 2000 CSPR liability, same asset),
+  custodian PASS @ 8500, valuation PASS @ 9500
+- finalize tx: `b8b499be977e1ec2b60dfad1b2fcc23e3862f0aa32058f45d1bfa34b09769fb3`
+- outcome: Backed (Pass 2: UNCERTAIN abstains, three PASS average 9000 >= 7000)
+
+Both runs were driven by `cli.ts claim <evidence>`, which opens the claim, reads
+the assigned id from open_claim's effects, runs the panel, and decodes the final
+ClaimStatus off-chain. No claim ids or outcomes are guessed.
 
 ### History / correction
 

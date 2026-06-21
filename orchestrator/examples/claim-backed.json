@@ -1,0 +1,10 @@
+{
+  "asset": "Note DEF - CSPR-collateralized on-chain note",
+  "denomination": "CSPR",
+  "stated_liabilities_cspr": 2000,
+  "reserve_wallet": "016c7e59de3b380b62cd1a65c63fb0c2a54be80e8cb9aee92b833d77776fcd5dc6",
+  "reported_reserves_cspr": 2682,
+  "custodian": "Casper Association",
+  "attestation": "Issuer attests that Note DEF is fully backed by native CSPR held in the named reserve wallet on Casper, as of 2026-06-21. Liabilities are 2000 CSPR; reserves are 2682 CSPR, a comfortable surplus in the same asset. Custody is held with the Casper Association, a recognized and reputable entity. Valuation is at par with the on-chain CSPR balance, no third-party price assumptions required.",
+  "note": "Honest, well-backed claim: reserves (2682 CSPR on-chain) exceed liabilities (2000 CSPR) in the correct asset, custodian is reputable, valuation is at-par. The panel should PASS this to Backed."
+}
