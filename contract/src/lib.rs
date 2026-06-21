@@ -4,3 +4,4 @@ extern crate alloc;
 
 pub mod flipper;
 pub mod types;
+pub mod federation;
