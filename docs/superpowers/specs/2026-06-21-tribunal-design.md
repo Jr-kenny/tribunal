@@ -49,15 +49,13 @@ That's the whole thing. A panel of sharp specialists, one of them can veto, the 
 count more, and they all live or die by their record. Casper is the building that keeps all the
 records and runs the scoring.
 
-## Why this is not VeriClaw (originality)
+## Originality
 
-VeriClaw (the CROO entry) was a single GenLayer call: one agent, one verdict. Tribunal is a
-different shape. It's a committee of specialized GenLayer judges, each answering a different
-sub-question, federated and economically governed on Casper. The novel parts (claim
-decomposition, reputation-weighted federation with critical-facet veto, on-chain reputation
-staking, the cross-chain attestation registry) are all new and all live on Casper. No CROO code
-is reused. GenLayer is used here the way you'd use any strong tool, not as a port of the old
-product.
+All code and content is original and newly developed for the Buildathon. The novel parts (claim
+decomposition into one specialist judge per facet, reputation-weighted federation with
+critical-facet veto, on-chain reputation staking, and the attestation registry) are all new and
+all live on Casper. GenLayer is used as the judgement engine the way you'd reach for any strong
+tool, while the consensus, federation, and economics that make Tribunal what it is run on Casper.
 
 ## The stack (verified current as of 2026-06-21)
 
