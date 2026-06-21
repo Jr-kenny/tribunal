@@ -182,3 +182,42 @@ Testnet demo and we still qualify.
 - How a judge's GenLayer verdict is relayed to Casper and how the GenLayer tx hash is carried as proof.
 - Resolution path: who submits ground truth, dispute handling, scoring of unobservable facets.
 - Number of judges for the demo (four for proof-of-reserves) and whether all four ship for qualification or a subset.
+
+## Cross-chain communication: GenLayer and Casper (the honest map)
+
+We dug into how a GenLayer verdict actually reaches Casper, including whether it could be done
+without any trusted middle party. This is the verified state of the terrain as of 2026-06-21, not
+a hand-wave.
+
+What is real and ours to build:
+
+- **GenLayer reads Casper under consensus.** GenLayer intelligent contracts can call the open web
+  (`gl.nondet.web` / cross-chain `eth_call`-style RPC) inside a consensus block, with the result
+  agreed by validators via an equivalence principle. So the solvency judge can pull the reserve
+  wallet's actual on-chain balance directly off Casper's RPC, as evidence it gathered itself and
+  its own validators verified. This is a genuine, trust-minimized cross-chain read, and it is the
+  cross-chain centerpiece we build.
+
+The wall on the write direction, and why:
+
+- Anything that changes state on Casper must be a signed Casper transaction. A GenLayer contract
+  cannot safely hold a Casper signing key, standard GenLayer storage is public on-chain. GenLayer
+  does have a TEE-based "PrivateAI" path, but it is built for keeping AI prompt data confidential
+  during inference, not documented as general signing-key custody.
+- GenLayer's clean cross-chain messaging is transport-agnostic by design but rides transport
+  layers (LayerZero is the first). None of those transports currently include Casper, so the
+  native-messaging lane does not reach Casper today.
+- GenLayer's raw `web.post` could fire an HTTP request at Casper's RPC, but the RPC only accepts an
+  already-signed transaction, which puts us back at the key.
+
+So the verdict is committed to Casper by a **minimized notary**: a signer that only commits what
+GenLayer provably attested (verifiable against the GenLayer tx), making no judgment of its own.
+GenLayer can initiate this by pushing its finalized verdict out via `web.post`, so the
+communication is GenLayer-initiated rather than polled.
+
+Named trustless upgrades (out of scope now, real future work):
+
+- A transport layer (LayerZero or similar) adds a Casper endpoint, giving native message passing.
+- A GenLayer-consensus light client implemented inside the Odra contract, so Casper verifies
+  GenLayer's validator signatures directly and anyone can submit a verdict permissionlessly. This
+  is the fully-trustless version and is research-grade.
