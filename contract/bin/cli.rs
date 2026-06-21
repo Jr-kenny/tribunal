@@ -31,7 +31,7 @@ impl DeployScript for TribunalDeployScript {
             &env,
             NoArgs,
             container,
-            700_000_000_000, // ~700 CSPR install ceiling; Tribunal wasm is larger than flipper
+            350_000_000_000, // 350 CSPR: the Odra template default, safely under the block gas limit
         )?;
 
         env.set_gas(6_000_000_000);
