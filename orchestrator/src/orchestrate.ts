@@ -6,7 +6,7 @@
 // judges provably attested. GenLayer is the trust-minimized judge; Casper is the
 // registry, federation, and economic settlement layer.
 
-import { runJudge, readVerdict, readReserve } from "./genlayer.js";
+import { runJudge, readVerdict, readReserve, readPrice } from "./genlayer.js";
 import { submitVerdict, finalize } from "./casper.js";
 import { config } from "./config.js";
 
@@ -17,6 +17,8 @@ export interface FacetSpec {
   judge: string;
   // solvency reads the reserve balance live off Casper before judging
   readsReserve?: boolean;
+  // valuation reads a live market price before judging (coingecko id, default for CSPR)
+  readsPrice?: boolean;
 }
 
 // facet ids match the Tribunal contract's configured ids (see judges/rubrics.py)
@@ -24,7 +26,7 @@ export const FACETS: FacetSpec[] = [
   { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge },
   { key: "solvency", facetId: 2, critical: true, judge: config.genlayerSolvencyJudge, readsReserve: true },
   { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge },
-  { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge },
+  { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, readsPrice: true },
 ];
 
 export interface FacetResult {
@@ -55,6 +57,14 @@ export async function judgeFacet(spec: FacetSpec, claimId: number, evidence: str
       const motes = await readReserve(spec.judge, String(claimId), config.casperPublicNodeUrl, wallet);
       console.log(`[${spec.key}] verified on-chain reserve: ${motes} motes (${motes / 1_000_000_000n} CSPR)`);
     }
+  }
+
+  if (spec.readsPrice) {
+    // coingecko id for the priced asset; defaults to CSPR for these claims
+    const symbol = (JSON.parse(evidence).price_symbol as string | undefined) ?? "casper-network";
+    console.log(`[${spec.key}] reading live market price for "${symbol}" under consensus...`);
+    const micro = await readPrice(spec.judge, String(claimId), symbol);
+    console.log(`[${spec.key}] verified market price: $${(Number(micro) / 1_000_000).toFixed(6)} per unit`);
   }
 
   console.log(`[${spec.key}] running GenLayer judge on claim ${claimId}...`);

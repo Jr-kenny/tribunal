@@ -119,18 +119,74 @@ def _read_casper_balance(node_url: str, public_key_hex: str) -> int:
     return gl.eq_principle.strict_eq(fetch)
 
 
-def _build_prompt(facet_name: str, rubric: str, evidence: str, verified_reserve_motes=None) -> str:
+# USD prices are stored in micro-USD (value * 1_000_000) so sub-cent assets
+# (CSPR trades below $0.01) keep their precision.
+PRICE_SCALE = 1_000_000
+
+
+def _read_market_price_micro(coingecko_id: str) -> int:
+    """Read an asset's USD price (micro-USD) from a public market API under
+    GenLayer consensus. Unlike the reserve balance, prices drift between fetches,
+    so validators agree within a tolerance band rather than on an exact value.
+    This is valuation's independent market price, gathered trust-minimized rather
+    than taken from the issuer's paperwork."""
+
+    url = "https://api.coingecko.com/api/v3/simple/price?ids=" + coingecko_id + "&vs_currencies=usd"
+
+    def leader_fn():
+        # gl.nondet.* must be called directly in the leader (the linter traces it
+        # from the equivalence block; nesting it in a helper breaks that).
+        res = gl.nondet.web.get(url)
+        status = int(getattr(res, "status", 200) or 200)
+        if status >= 500:
+            raise gl.vm.UserError(f"{ERROR_TRANSIENT} price api {status}")
+        if status >= 400:
+            raise gl.vm.UserError(f"{ERROR_EXTERNAL} price api {status}")
+        data = json.loads(res.body.decode("utf-8"))
+        if coingecko_id not in data or "usd" not in data[coingecko_id]:
+            raise gl.vm.UserError(f"{ERROR_EXTERNAL} price api: no usd price for {coingecko_id}")
+        return {"micro": int(round(float(data[coingecko_id]["usd"]) * PRICE_SCALE))}
+
+    def validator_fn(leaders_res: gl.vm.Result) -> bool:
+        if not isinstance(leaders_res, gl.vm.Return):
+            return _handle_leader_error(leaders_res, leader_fn)
+        mine = leader_fn()["micro"]
+        theirs = int(leaders_res.calldata.get("micro", 0))
+        # both must agree on whether a price exists, then land within 5%
+        if (mine == 0) != (theirs == 0):
+            return False
+        if mine > 0 and theirs > 0:
+            ratio = mine / theirs
+            if ratio > 1.05 or ratio < 0.95:
+                return False
+        return True
+
+    result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+    return int(result["micro"])
+
+
+def _build_prompt(facet_name: str, rubric: str, evidence: str, verified_reserve_motes=None, verified_price_micro=None) -> str:
     verified_block = ""
     if verified_reserve_motes is not None:
         # 1 CSPR = 1_000_000_000 motes. Integer-only to stay deterministic.
         cspr = int(verified_reserve_motes) // 1_000_000_000
-        verified_block = f"""
+        verified_block += f"""
 
 VERIFIED ON-CHAIN RESERVE (read live from the Casper chain by the validators
 under consensus, not supplied by the issuer). This is ground truth for what the
 reserve wallet actually holds. Trust THIS over any reserve figure stated in the
 evidence above, even if the evidence claims a larger amount:
 {verified_reserve_motes} motes ({cspr} CSPR)
+"""
+    if verified_price_micro is not None:
+        whole = int(verified_price_micro) // 1_000_000
+        frac = int(verified_price_micro) % 1_000_000
+        verified_block += f"""
+
+VERIFIED LIVE MARKET PRICE (read under GenLayer consensus from a public market
+API, not supplied by the issuer). Use this as the independent market price when
+judging whether the claimed value holds up:
+${whole}.{frac:06d} USD per unit
 """
     return f"""You are a specialist verification judge on a panel. You assess ONLY one
 facet of a real-world-asset claim and nothing else.
@@ -144,8 +200,9 @@ Evidence provided for this claim:
 
 Decide PASS (the facet holds), FAIL (it does not), or UNCERTAIN (the evidence is
 insufficient to decide). Do not stray outside your facet. Base the decision on the
-evidence above, and where a verified on-chain reserve is given, treat it as the
-real reserve regardless of what the issuer's paperwork claims.
+evidence above, and where a verified on-chain reserve or a verified live market
+price is given, treat it as ground truth regardless of what the issuer's paperwork
+claims.
 
 Respond with strict JSON and nothing else:
 {{"vote": "PASS|FAIL|UNCERTAIN", "confidence": <integer 0-100>, "reason": "<one or two sentences>"}}"""
@@ -159,6 +216,8 @@ class FacetJudge(gl.Contract):
     verdicts: TreeMap[str, str]
     # claim_id -> reserve balance (motes, as string) read live from Casper
     reserves: TreeMap[str, str]
+    # claim_id -> market price (micro-USD, as string) read live from a price API
+    prices: TreeMap[str, str]
 
     def __init__(self, facet_name: str, rubric: str):
         self.facet_name = facet_name
@@ -176,6 +235,18 @@ class FacetJudge(gl.Contract):
         """Read the reserve account's Casper balance under consensus and store it."""
         balance = _read_casper_balance(node_url, reserve_public_key)
         self.reserves[claim_id] = str(balance)
+
+    @gl.public.view
+    def get_price(self, claim_id: str) -> str:
+        if claim_id not in self.prices:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} no price read for claim {claim_id}")
+        return self.prices[claim_id]
+
+    @gl.public.write
+    def read_price(self, claim_id: str, coingecko_id: str) -> None:
+        """Read the asset's live USD market price under consensus and store it (micro-USD)."""
+        micro = _read_market_price_micro(coingecko_id)
+        self.prices[claim_id] = str(micro)
 
     @gl.public.view
     def get_facet(self) -> dict:
@@ -196,9 +267,10 @@ class FacetJudge(gl.Contract):
         # verified balance to the judge as ground truth so the verdict is decided
         # against the chain, not against a self-reported number in the evidence.
         verified = self.reserves[claim_id] if claim_id in self.reserves else None
+        price = self.prices[claim_id] if claim_id in self.prices else None
 
         def leader_fn():
-            prompt = _build_prompt(facet_name, rubric, evidence, verified)
+            prompt = _build_prompt(facet_name, rubric, evidence, verified, price)
             analysis = gl.nondet.exec_prompt(prompt, response_format="json")
             return _normalize_verdict(analysis)
 

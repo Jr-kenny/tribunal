@@ -69,6 +69,32 @@ export async function readVerdict(judgeAddress: string, claimId: string): Promis
   throw new Error(`No verdict for claim ${claimId} after retries`);
 }
 
+/** Make the judge fetch a live USD market price under consensus, returning micro-USD. */
+export async function readPrice(
+  judgeAddress: string,
+  claimId: string,
+  coingeckoId: string,
+): Promise<bigint> {
+  const client = makeClient();
+  const txHash = await client.writeContract({
+    address: judgeAddress as `0x${string}`,
+    functionName: "read_price",
+    args: [claimId, coingeckoId],
+    value: 0n,
+  });
+  await client.waitForTransactionReceipt({ hash: txHash, ...ACCEPTED });
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const raw = await client.readContract({
+      address: judgeAddress as `0x${string}`,
+      functionName: "get_price",
+      args: [claimId],
+    });
+    if (raw) return BigInt(raw as string);
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+  throw new Error(`No price read for claim ${claimId} after retries`);
+}
+
 /** Cross-chain read: make the judge fetch a Casper reserve balance under consensus. */
 export async function readReserve(
   judgeAddress: string,

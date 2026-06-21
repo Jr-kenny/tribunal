@@ -17,16 +17,21 @@ One deployed FacetJudge per facet, each code-verified on-chain (`genlayer code`)
 - Authenticity: `0x1FeFc4de7737dfbe3132140d61F733Fa802B3680`
 - Solvency: `0x324f3e4F53AEF007fAB346dee9b04Ee2f6194b2b`
 - Custodian: `0x98138498403B6DFd0300Fe44E71a44A05FFE53Ee`
-- Valuation: `0xBfC0fb8D42F299DE54819E369410B4eBF88E3373`
+- Valuation: `0x6f57d0e8Fe5F6B23b4C0c87aBeeBBC7eFB80Cb1F`
 
-Solvency reads the reserve wallet's balance live off Casper under GenLayer
-consensus (`read_reserve`) and decides against that on-chain figure, not against
-any reserve number stated in the claim's paperwork. Proven on a crafted "lying"
-claim (paperwork attests $12.5M backing; the wallet holds ~2687 CSPR): the judge
-returns FAIL citing the real on-chain balance. Authenticity, custodian, and
-valuation currently reason over the supplied evidence; their own per-facet
-on-chain/external fetches (price feed, registry/sanctions, signature check) are
-the next layer, mirroring how solvency reads the chain.
+Two facets now fetch their own truth under consensus:
+- Solvency reads the reserve wallet's balance live off Casper (`read_reserve`,
+  strict_eq) and decides against that on-chain figure, not the paperwork. Proven
+  on a "lying" claim (attests $12.5M; wallet holds ~2687 CSPR): FAIL citing the
+  real balance.
+- Valuation reads a live USD market price (`read_price`, CoinGecko) under a
+  tolerance-band equivalence (validators agree within 5%, since prices drift).
+  Stored in micro-USD so sub-cent assets keep precision. Proven reading CSPR at
+  ~$0.0024 and judging against it.
+
+Authenticity and custodian still reason over the supplied evidence; their own
+fetches (signature/attestation verification, registry/sanctions lookup) are the
+next layer, mirroring solvency and valuation.
 
 ### Full four-judge panel run (claim 4, unbacked example)
 
