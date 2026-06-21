@@ -89,6 +89,36 @@ def _handle_leader_error(leaders_res, leader_fn) -> bool:
         return False
 
 
+def _read_casper_balance(node_url: str, public_key_hex: str) -> int:
+    """Read a Casper account's main-purse balance straight off its RPC, under
+    GenLayer consensus. This is the cross-chain read: GenLayer's own validators
+    each fetch the balance and must agree (strict_eq) on the exact motes value,
+    so the reserve figure is gathered trust-minimized rather than handed in."""
+
+    def fetch() -> int:
+        # body MUST be a JSON string for the GenVM web API, not bytes.
+        payload = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "query_balance",
+                "params": {"purse_identifier": {"main_purse_under_public_key": public_key_hex}},
+            }
+        )
+        res = gl.nondet.web.post(node_url, body=payload, headers={"Content-Type": "application/json"})
+        status = int(getattr(res, "status", 200) or 200)
+        if status >= 500:
+            raise gl.vm.UserError(f"{ERROR_TRANSIENT} Casper node {status}")
+        if status >= 400:
+            raise gl.vm.UserError(f"{ERROR_EXTERNAL} Casper node {status}")
+        data = json.loads(res.body.decode("utf-8"))
+        if "error" in data:
+            raise gl.vm.UserError(f"{ERROR_EXTERNAL} Casper RPC error: {data['error']}")
+        return int(data["result"]["balance"])
+
+    return gl.eq_principle.strict_eq(fetch)
+
+
 def _build_prompt(facet_name: str, rubric: str, evidence: str) -> str:
     return f"""You are a specialist verification judge on a panel. You assess ONLY one
 facet of a real-world-asset claim and nothing else.
@@ -114,11 +144,25 @@ class FacetJudge(gl.Contract):
     owner: Address
     # claim_id -> JSON verdict string
     verdicts: TreeMap[str, str]
+    # claim_id -> reserve balance (motes, as string) read live from Casper
+    reserves: TreeMap[str, str]
 
     def __init__(self, facet_name: str, rubric: str):
         self.facet_name = facet_name
         self.rubric = rubric
         self.owner = gl.message.sender_account
+
+    @gl.public.view
+    def get_reserve(self, claim_id: str) -> str:
+        if claim_id not in self.reserves:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} no reserve read for claim {claim_id}")
+        return self.reserves[claim_id]
+
+    @gl.public.write
+    def read_reserve(self, claim_id: str, node_url: str, reserve_public_key: str) -> None:
+        """Read the reserve account's Casper balance under consensus and store it."""
+        balance = _read_casper_balance(node_url, reserve_public_key)
+        self.reserves[claim_id] = str(balance)
 
     @gl.public.view
     def get_facet(self) -> dict:
