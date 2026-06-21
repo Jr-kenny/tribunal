@@ -33,14 +33,21 @@ Authenticity and custodian still reason over the supplied evidence; their own
 fetches (signature/attestation verification, registry/sanctions lookup) are the
 next layer, mirroring solvency and valuation.
 
-### Full four-judge panel run (claim 4, unbacked example)
+### Full four-judge panel run (claim 8, unbacked example)
 
-Claim id read back from `open_claim`'s effects (not guessed). All Casper txs
-executed cleanly; final status read from chain (claim_status 00 Open -> 03 NotBacked):
+Claim id read back from `open_claim`'s effects (not guessed). Two facets fetched
+their own truth under consensus during the run: solvency read the reserve (2653
+CSPR live off Casper) and valuation read the live price ($0.002377), both cited
+in their verdicts. All Casper txs executed cleanly; final status read from chain
+(claim_status 00 Open -> 03 NotBacked):
 
-- authenticity UNCERTAIN @ 8200, solvency FAIL @ 9900, custodian UNCERTAIN @ 9500, valuation FAIL @ 9500
-- finalize tx: `78ca71ea97c9f5e5b39112c82ac650c1d2b975ccc39f2b3aa83246fc3a9790db`
-- outcome: NotBacked (Pass 1 critical veto: solvency FAIL weighted 4950 >= 4000)
+- authenticity UNCERTAIN @ 9000, solvency FAIL @ 10000, custodian UNCERTAIN @ 9500, valuation FAIL @ 8500
+- finalize tx: `60d6603832ac50e2dc6eb74d3858ae04db5fb7976a317faa0554b047425f43e8`
+- outcome: NotBacked (Pass 1 critical veto: solvency FAIL weighted 5000 >= 4000)
+
+Note: GenLayer's studionet RPC had transient connect-timeouts during one earlier
+attempt (claims 6 and 7 left unfinalized). A retry wrapper around the judge calls
+would make a mid-panel blip non-fatal; not yet added.
 
 ### Full four-judge panel run (claim 5, backed example)
 
