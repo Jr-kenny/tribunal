@@ -1,78 +1,111 @@
-//! This example demonstrates how to use the `odra-cli` tool to deploy and interact with a smart contract.
+//! odra-cli entrypoint for the Tribunal contract: deploy + configure the panel,
+//! and a `demo` scenario that runs one claim end to end on-chain.
 
-use tribunal::flipper::Flipper;
+use tribunal::tribunal::Tribunal;
+use tribunal::types::Vote;
 use odra::host::{HostEnv, NoArgs};
 use odra::schema::casper_contract_schema::NamedCLType;
 use odra_cli::{
     deploy::DeployScript,
     scenario::{Args, Error, Scenario, ScenarioMetadata},
-    CommandArg, ContractProvider, DeployedContractsContainer, DeployerExt,
-    OdraCli, 
+    CommandArg, ContractProvider, DeployedContractsContainer, DeployerExt, OdraCli,
 };
 
-/// Deploys the `Flipper` and adds it to the container.
-pub struct FlipperDeployScript;
+// facet ids must match the rubrics in judges/rubrics.py
+const AUTHENTICITY: u8 = 1;
+const SOLVENCY: u8 = 2;
+const CUSTODIAN: u8 = 3;
+const VALUATION: u8 = 4;
 
-impl DeployScript for FlipperDeployScript {
+/// Deploys Tribunal, configures the four proof-of-reserves facets, and registers
+/// the deployer as the solvency judge so the qualifying demo can submit a verdict.
+pub struct TribunalDeployScript;
+
+impl DeployScript for TribunalDeployScript {
     fn deploy(
         &self,
         env: &HostEnv,
-        container: &mut DeployedContractsContainer
+        container: &mut DeployedContractsContainer,
     ) -> Result<(), odra_cli::deploy::Error> {
-        let _flipper = Flipper::load_or_deploy(
+        let mut tribunal = Tribunal::load_or_deploy(
             &env,
             NoArgs,
             container,
-            350_000_000_000 // Adjust gas limit as needed
+            700_000_000_000, // ~700 CSPR install ceiling; Tribunal wasm is larger than flipper
         )?;
+
+        env.set_gas(6_000_000_000);
+        tribunal.configure_facet(AUTHENTICITY, 1, false);
+        env.set_gas(6_000_000_000);
+        tribunal.configure_facet(SOLVENCY, 1, true);
+        env.set_gas(6_000_000_000);
+        tribunal.configure_facet(CUSTODIAN, 1, false);
+        env.set_gas(6_000_000_000);
+        tribunal.configure_facet(VALUATION, 1, false);
+
+        // register the deployer itself as the solvency judge for the first demo
+        env.set_gas(6_000_000_000);
+        let judge = env.get_account(0);
+        tribunal.register_judge(judge);
 
         Ok(())
     }
 }
 
-/// Scenario that flips the state of the deployed `Flipper` contract a specified number of times.
-pub struct FlippingScenario;
+/// Runs one claim end to end: open -> submit a solvency verdict -> finalize.
+/// These are the transaction-producing on-chain calls the qualification needs.
+pub struct DemoScenario;
 
-impl Scenario for FlippingScenario {
+impl Scenario for DemoScenario {
     fn args(&self) -> Vec<CommandArg> {
-        vec![CommandArg::new(
-            "number",
-            "The number of times to flip the state",
-            NamedCLType::U64,
-        )]
+        vec![
+            CommandArg::new("vote", "Solvency vote: PASS | FAIL | UNCERTAIN", NamedCLType::String),
+            CommandArg::new("confidence", "Confidence in basis points (0-10000)", NamedCLType::U64),
+        ]
     }
 
     fn run(
         &self,
         env: &HostEnv,
         container: &DeployedContractsContainer,
-        args: Args
+        args: Args,
     ) -> Result<(), Error> {
-        let mut contract = container.contract_ref::<Flipper>(env)?;
-        let n = args.get_single::<u64>("name")?;
+        let mut tribunal = container.contract_ref::<Tribunal>(env)?;
 
-        env.set_gas(50_000_000);
-        for _ in 0..n {
-            contract.try_flip()?;
-        }
+        let vote_s = args.get_single::<String>("vote")?;
+        let confidence = args.get_single::<u64>("confidence")? as u32;
+        let vote = match vote_s.to_uppercase().as_str() {
+            "PASS" => Vote::Pass,
+            "FAIL" => Vote::Fail,
+            _ => Vote::Uncertain,
+        };
 
+        env.set_gas(6_000_000_000);
+        let claim = tribunal.try_open_claim()?;
+
+        env.set_gas(6_000_000_000);
+        tribunal.try_submit_verdict(claim, SOLVENCY, vote, confidence, "gl:demo-proof".to_string())?;
+
+        env.set_gas(6_000_000_000);
+        let status = tribunal.try_finalize(claim)?;
+
+        println!("claim {claim} finalized on-chain with status: {status:?}");
         Ok(())
     }
 }
 
-impl ScenarioMetadata for FlippingScenario {
-    const NAME: &'static str = "flip";
+impl ScenarioMetadata for DemoScenario {
+    const NAME: &'static str = "demo";
     const DESCRIPTION: &'static str =
-        "Flips the state of the deployed flipper contract a specified number of times";
+        "Open a claim, submit a solvency verdict, and finalize it on-chain";
 }
 
-/// Main function to run the CLI tool.
 pub fn main() {
     OdraCli::new()
-        .about("CLI tool for tribunal smart contract")
-        .deploy(FlipperDeployScript)
-        .contract::<Flipper>()
-        .scenario(FlippingScenario)
+        .about("CLI tool for the Tribunal contract")
+        .deploy(TribunalDeployScript)
+        .contract::<Tribunal>()
+        .scenario(DemoScenario)
         .build()
         .run();
 }
