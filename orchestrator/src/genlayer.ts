@@ -1,8 +1,9 @@
 // GenLayer half of the relay: run a facet judge, wait for ACCEPTED, read the
 // verdict it stored, and report the GenLayer tx hash (the proof carried onto
-// Casper). Mirrors the proven Tokenpost genlayer-js pattern: createClient +
-// writeContract + waitForTransactionReceipt(ACCEPTED) + readContract(accepted).
+// Casper). The flow is write the judge call, wait for ACCEPTED, then read back
+// the verdict the judge committed to state.
 
+import { readFileSync } from "node:fs";
 import { createAccount, createClient } from "genlayer-js";
 import { localnet, studionet, testnetAsimov, testnetBradbury } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
@@ -31,9 +32,10 @@ function getChain(name: string) {
 }
 
 function makeClient() {
-  if (!config.genlayerDeployerKey) throw new Error("Missing GENLAYER_DEPLOYER_PRIVATE_KEY");
+  if (!config.genlayerDeployerKeyPath) throw new Error("Missing GENLAYER_DEPLOYER_KEY path");
   const chain = getChain(config.genlayerNetwork);
-  const account = createAccount(config.genlayerDeployerKey as `0x${string}`);
+  const key = readFileSync(config.genlayerDeployerKeyPath, "utf8").trim();
+  const account = createAccount(key as `0x${string}`);
   return createClient({ chain, account });
 }
 

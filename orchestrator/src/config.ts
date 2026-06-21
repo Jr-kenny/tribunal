@@ -15,7 +15,7 @@ export const config = {
 
   // GenLayer (network names: localnet | studionet | testnet-asimov | testnet-bradbury)
   genlayerNetwork: process.env.GENLAYER_NETWORK ?? "studionet",
-  genlayerDeployerKey: process.env.GENLAYER_DEPLOYER_PRIVATE_KEY ?? "",
+  genlayerDeployerKeyPath: process.env.GENLAYER_DEPLOYER_KEY ?? "",
   genlayerSolvencyJudge: process.env.GENLAYER_SOLVENCY_JUDGE ?? "",
 } as const;
 
