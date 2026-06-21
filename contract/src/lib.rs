@@ -6,3 +6,4 @@ pub mod flipper;
 pub mod types;
 pub mod federation;
 pub mod reputation;
+pub mod tribunal;
