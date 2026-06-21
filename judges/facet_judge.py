@@ -165,7 +165,60 @@ def _read_market_price_micro(coingecko_id: str) -> int:
     return int(result["micro"])
 
 
-def _build_prompt(facet_name: str, rubric: str, evidence: str, verified_reserve_motes=None, verified_price_micro=None) -> str:
+def _read_entity_record(entity_name: str) -> dict:
+    """Look the named custodian up in a public knowledge source (Wikipedia REST)
+    under consensus. A real, recognizable entity resolves to an article; a
+    fabricated one 404s. Validators agree on whether it was found and on the title,
+    so this is custodian's independent existence check, not the issuer's say-so."""
+
+    name = entity_name.strip().replace(" ", "_")
+    url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + name
+
+    def leader_fn():
+        res = gl.nondet.web.get(url)
+        status = int(getattr(res, "status", 200) or 200)
+        if status == 404:
+            return {"found": False, "title": "", "summary": ""}
+        if status >= 500:
+            raise gl.vm.UserError(f"{ERROR_TRANSIENT} wiki api {status}")
+        if status >= 400:
+            return {"found": False, "title": "", "summary": ""}
+        data = json.loads(res.body.decode("utf-8"))
+        return {"found": True, "title": str(data.get("title", "")), "summary": str(data.get("extract", ""))[:400]}
+
+    def validator_fn(leaders_res: gl.vm.Result) -> bool:
+        if not isinstance(leaders_res, gl.vm.Return):
+            return _handle_leader_error(leaders_res, leader_fn)
+        mine = leader_fn()
+        theirs = leaders_res.calldata
+        # agree on the stable facts: did it resolve, and to the same article
+        return mine.get("found") == theirs.get("found") and mine.get("title") == theirs.get("title")
+
+    return gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+
+
+def _verify_document(url: str, expected_sha256: str) -> dict:
+    """Fetch the attestation document from its published URL and verify its
+    SHA-256 against the digest in the claim, under consensus. This is
+    authenticity's integrity check: the bytes are deterministic, so validators
+    must agree on the exact hash (strict_eq). A tampered or swapped document fails."""
+
+    def fetch_and_hash():
+        res = gl.nondet.web.get(url)
+        status = int(getattr(res, "status", 200) or 200)
+        if status >= 500:
+            raise gl.vm.UserError(f"{ERROR_TRANSIENT} document host {status}")
+        if status >= 400:
+            raise gl.vm.UserError(f"{ERROR_EXTERNAL} document host {status}")
+        import hashlib
+
+        actual = hashlib.sha256(res.body).hexdigest()
+        return {"actual": actual, "match": actual.lower() == expected_sha256.strip().lower()}
+
+    return gl.eq_principle.strict_eq(fetch_and_hash)
+
+
+def _build_prompt(facet_name: str, rubric: str, evidence: str, verified_reserve_motes=None, verified_price_micro=None, verified_custodian=None, verified_attestation=None) -> str:
     verified_block = ""
     if verified_reserve_motes is not None:
         # 1 CSPR = 1_000_000_000 motes. Integer-only to stay deterministic.
@@ -188,6 +241,37 @@ API, not supplied by the issuer). Use this as the independent market price when
 judging whether the claimed value holds up:
 ${whole}.{frac:06d} USD per unit
 """
+    if verified_custodian is not None:
+        found = verified_custodian.get("found")
+        title = verified_custodian.get("title", "")
+        summary = verified_custodian.get("summary", "")
+        if found:
+            verified_block += f"""
+
+VERIFIED EXTERNAL RECORD for the named custodian (looked up under GenLayer
+consensus in a public knowledge source, not supplied by the issuer). The entity
+resolves to a real public record:
+title: {title}
+summary: {summary}
+"""
+        else:
+            verified_block += """
+
+VERIFIED EXTERNAL RECORD for the named custodian (looked up under GenLayer
+consensus): NO public record found for this entity. Treat an unfindable custodian
+as a red flag for legitimacy.
+"""
+    if verified_attestation is not None:
+        match = verified_attestation.get("match")
+        actual = verified_attestation.get("actual", "")
+        verified_block += f"""
+
+VERIFIED DOCUMENT INTEGRITY (the attestation document was fetched from its
+published URL and hashed under GenLayer consensus, not trusted from the issuer):
+the document's actual SHA-256 {"MATCHES" if match else "DOES NOT MATCH"} the digest
+in the claim. actual sha256: {actual}
+Treat a mismatch as tampering or a swapped document.
+"""
     return f"""You are a specialist verification judge on a panel. You assess ONLY one
 facet of a real-world-asset claim and nothing else.
 
@@ -200,9 +284,9 @@ Evidence provided for this claim:
 
 Decide PASS (the facet holds), FAIL (it does not), or UNCERTAIN (the evidence is
 insufficient to decide). Do not stray outside your facet. Base the decision on the
-evidence above, and where a verified on-chain reserve or a verified live market
-price is given, treat it as ground truth regardless of what the issuer's paperwork
-claims.
+evidence above, and where any VERIFIED block is given (on-chain reserve, live
+market price, external custodian record, or document integrity), treat it as
+ground truth regardless of what the issuer's paperwork claims.
 
 Respond with strict JSON and nothing else:
 {{"vote": "PASS|FAIL|UNCERTAIN", "confidence": <integer 0-100>, "reason": "<one or two sentences>"}}"""
@@ -218,6 +302,10 @@ class FacetJudge(gl.Contract):
     reserves: TreeMap[str, str]
     # claim_id -> market price (micro-USD, as string) read live from a price API
     prices: TreeMap[str, str]
+    # claim_id -> JSON custodian record looked up in a public knowledge source
+    custodians: TreeMap[str, str]
+    # claim_id -> JSON document-integrity result (fetched + hashed under consensus)
+    attestations: TreeMap[str, str]
 
     def __init__(self, facet_name: str, rubric: str):
         self.facet_name = facet_name
@@ -249,6 +337,30 @@ class FacetJudge(gl.Contract):
         self.prices[claim_id] = str(micro)
 
     @gl.public.view
+    def get_custodian(self, claim_id: str) -> str:
+        if claim_id not in self.custodians:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} no custodian lookup for claim {claim_id}")
+        return self.custodians[claim_id]
+
+    @gl.public.write
+    def read_custodian(self, claim_id: str, entity_name: str) -> None:
+        """Look the custodian up in a public knowledge source under consensus and store it."""
+        record = _read_entity_record(entity_name)
+        self.custodians[claim_id] = json.dumps(record)
+
+    @gl.public.view
+    def get_attestation(self, claim_id: str) -> str:
+        if claim_id not in self.attestations:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} no attestation check for claim {claim_id}")
+        return self.attestations[claim_id]
+
+    @gl.public.write
+    def read_attestation(self, claim_id: str, url: str, expected_sha256: str) -> None:
+        """Fetch the attestation document and verify its SHA-256 under consensus, then store it."""
+        result = _verify_document(url, expected_sha256)
+        self.attestations[claim_id] = json.dumps(result)
+
+    @gl.public.view
     def get_facet(self) -> dict:
         return {"facet_name": self.facet_name, "rubric": self.rubric}
 
@@ -268,9 +380,11 @@ class FacetJudge(gl.Contract):
         # against the chain, not against a self-reported number in the evidence.
         verified = self.reserves[claim_id] if claim_id in self.reserves else None
         price = self.prices[claim_id] if claim_id in self.prices else None
+        custodian = json.loads(self.custodians[claim_id]) if claim_id in self.custodians else None
+        attestation = json.loads(self.attestations[claim_id]) if claim_id in self.attestations else None
 
         def leader_fn():
-            prompt = _build_prompt(facet_name, rubric, evidence, verified, price)
+            prompt = _build_prompt(facet_name, rubric, evidence, verified, price, custodian, attestation)
             analysis = gl.nondet.exec_prompt(prompt, response_format="json")
             return _normalize_verdict(analysis)
 

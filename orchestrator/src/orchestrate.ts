@@ -6,7 +6,7 @@
 // judges provably attested. GenLayer is the trust-minimized judge; Casper is the
 // registry, federation, and economic settlement layer.
 
-import { runJudge, readVerdict, readReserve, readPrice } from "./genlayer.js";
+import { runJudge, readVerdict, readReserve, readPrice, readCustodian, readAttestation } from "./genlayer.js";
 import { submitVerdict, finalize } from "./casper.js";
 import { config } from "./config.js";
 
@@ -15,17 +15,18 @@ export interface FacetSpec {
   facetId: number;
   critical: boolean;
   judge: string;
-  // solvency reads the reserve balance live off Casper before judging
-  readsReserve?: boolean;
-  // valuation reads a live market price before judging (coingecko id, default for CSPR)
-  readsPrice?: boolean;
+  // each facet that verifies external/on-chain truth fetches it under consensus first:
+  readsReserve?: boolean; // solvency: reserve balance off Casper
+  readsPrice?: boolean; // valuation: live market price
+  readsCustodian?: boolean; // custodian: public knowledge-source lookup
+  readsAttestation?: boolean; // authenticity: document SHA-256 integrity check
 }
 
 // facet ids match the Tribunal contract's configured ids (see judges/rubrics.py)
 export const FACETS: FacetSpec[] = [
-  { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge },
+  { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge, readsAttestation: true },
   { key: "solvency", facetId: 2, critical: true, judge: config.genlayerSolvencyJudge, readsReserve: true },
-  { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge },
+  { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge, readsCustodian: true },
   { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, readsPrice: true },
 ];
 
@@ -65,6 +66,24 @@ export async function judgeFacet(spec: FacetSpec, claimId: number, evidence: str
     console.log(`[${spec.key}] reading live market price for "${symbol}" under consensus...`);
     const micro = await readPrice(spec.judge, String(claimId), symbol);
     console.log(`[${spec.key}] verified market price: $${(Number(micro) / 1_000_000).toFixed(6)} per unit`);
+  }
+
+  if (spec.readsCustodian) {
+    const name = JSON.parse(evidence).custodian as string | undefined;
+    if (name) {
+      console.log(`[${spec.key}] looking up custodian "${name}" under consensus...`);
+      const record = JSON.parse(await readCustodian(spec.judge, String(claimId), name));
+      console.log(`[${spec.key}] custodian record: ${record.found ? `found "${record.title}"` : "NO public record"}`);
+    }
+  }
+
+  if (spec.readsAttestation) {
+    const ev = JSON.parse(evidence);
+    if (ev.document_url && ev.document_sha256) {
+      console.log(`[${spec.key}] fetching + hashing attestation document under consensus...`);
+      const result = JSON.parse(await readAttestation(spec.judge, String(claimId), ev.document_url, ev.document_sha256));
+      console.log(`[${spec.key}] document integrity: ${result.match ? "SHA-256 matches" : "SHA-256 MISMATCH"}`);
+    }
   }
 
   console.log(`[${spec.key}] running GenLayer judge on claim ${claimId}...`);

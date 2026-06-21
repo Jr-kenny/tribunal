@@ -14,24 +14,27 @@ all execute cleanly on testnet (verified on the receipts, not just ACCEPTED).
 
 One deployed FacetJudge per facet, each code-verified on-chain (`genlayer code`):
 
-- Authenticity: `0x1FeFc4de7737dfbe3132140d61F733Fa802B3680`
+- Authenticity: `0xCC17Ce06bC61c65fea6662e3ECf35f78AED0371e`
 - Solvency: `0x324f3e4F53AEF007fAB346dee9b04Ee2f6194b2b`
-- Custodian: `0x98138498403B6DFd0300Fe44E71a44A05FFE53Ee`
+- Custodian: `0x1072595Ba4a0d208cF5DF12d056b5f7552055340`
 - Valuation: `0x6f57d0e8Fe5F6B23b4C0c87aBeeBBC7eFB80Cb1F`
 
-Two facets now fetch their own truth under consensus:
+All four facets now fetch their own truth under GenLayer consensus, each matched
+to the right equivalence rule for its source:
 - Solvency reads the reserve wallet's balance live off Casper (`read_reserve`,
-  strict_eq) and decides against that on-chain figure, not the paperwork. Proven
-  on a "lying" claim (attests $12.5M; wallet holds ~2687 CSPR): FAIL citing the
-  real balance.
+  strict_eq, exact). Proven on a "lying" claim (attests $12.5M; wallet ~2687 CSPR): FAIL.
 - Valuation reads a live USD market price (`read_price`, CoinGecko) under a
-  tolerance-band equivalence (validators agree within 5%, since prices drift).
-  Stored in micro-USD so sub-cent assets keep precision. Proven reading CSPR at
-  ~$0.0024 and judging against it.
+  custom validator with a 5% tolerance band (prices drift). Micro-USD so sub-cent
+  assets keep precision. Proven reading CSPR ~$0.0023.
+- Custodian looks the named entity up in a public knowledge source (`read_custodian`,
+  Wikipedia REST), validators agreeing on found + title. Proven resolving "BitGo".
+- Authenticity fetches the attestation document from its URL and verifies its
+  SHA-256 (`read_attestation`, strict_eq on the hash). Proven: integrity matched
+  but the judge still FAILed a hash-valid document that was the wrong kind of file.
 
-Authenticity and custodian still reason over the supplied evidence; their own
-fetches (signature/attestation verification, registry/sanctions lookup) are the
-next layer, mirroring solvency and valuation.
+The relay routes every GenLayer RPC call through a retry wrapper, since studionet
+throws transient connect-timeouts under load; a blip now retries instead of
+crashing a panel run.
 
 ### Full four-judge panel run (claim 8, unbacked example)
 
@@ -59,7 +62,20 @@ A CSPR-collateralized note whose on-chain reserve genuinely covers it:
 - finalize tx: `b8b499be977e1ec2b60dfad1b2fcc23e3862f0aa32058f45d1bfa34b09769fb3`
 - outcome: Backed (Pass 2: UNCERTAIN abstains, three PASS average 9000 >= 7000)
 
-Both runs were driven by `cli.ts claim <evidence>`, which opens the claim, reads
+### Full four-judge panel run (claim 10, all four fetching)
+
+A backed claim where every facet fetched its own truth in one run:
+
+- authenticity fetched the referenced document, SHA-256 matched, but FAILed @ 9800
+  (the file is a software license, not an attestation, hash-valid but wrong document)
+- solvency PASS @ 10000 (2640 CSPR read live >= 2000 CSPR liability)
+- custodian PASS @ 10000 ("BitGo" resolved in a public knowledge source)
+- valuation PASS @ 9500 (live CSPR price $0.002306 read under consensus)
+- finalize tx: `b816d000bb36c3a520270e314f44905d682aed8add1820ae81e7eeddd7f75f3d`
+- outcome: Disputed (one strong non-critical FAIL pulls the aggregate to ~4925,
+  between the 4000 and 7000 bands: real money and custodian, bogus paperwork)
+
+All runs were driven by `cli.ts claim <evidence>`, which opens the claim, reads
 the assigned id from open_claim's effects, runs the panel, and decodes the final
 ClaimStatus off-chain. No claim ids or outcomes are guessed.
 

@@ -41,16 +41,46 @@ function makeClient() {
 
 const ACCEPTED = { status: TransactionStatus.ACCEPTED, interval: 5_000, retries: 120 } as const;
 
+// GenLayer's RPC throws transient connect-timeouts ("fetch failed") under load.
+// Those happen before the request reaches the server, so retrying is safe (no
+// double-submit). Wrap each RPC call so a blip doesn't kill a whole panel run.
+async function withRetry<T>(label: string, fn: () => Promise<T>, tries = 5): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= tries; attempt += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const blob = `${(e as Error)?.message ?? ""} ${JSON.stringify(e)?.slice(0, 600) ?? ""}`;
+      const transient = /fetch failed|timeout|ECONN|ETIMEDOUT|UND_ERR|socket hang|network/i.test(blob);
+      if (!transient || attempt === tries) throw e;
+      const delay = 2_000 * attempt;
+      console.log(`  [retry] ${label}: transient RPC error, retrying in ${delay}ms (${attempt}/${tries - 1})`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+// All GenLayer RPC calls go through these so a transient blip retries instead of
+// crashing the run. writes/waits/reads are idempotent here (keyed by claim id).
+const rpcWrite = (client: ReturnType<typeof makeClient>, params: any) =>
+  withRetry("writeContract", () => client.writeContract(params));
+const rpcWait = (client: ReturnType<typeof makeClient>, params: any) =>
+  withRetry("waitReceipt", () => client.waitForTransactionReceipt(params));
+const rpcRead = (client: ReturnType<typeof makeClient>, params: any) =>
+  withRetry("readContract", () => client.readContract(params));
+
 /** Run the judge on a claim and return the GenLayer tx hash (the on-chain proof). */
 export async function runJudge(judgeAddress: string, claimId: string, evidence: string): Promise<string> {
   const client = makeClient();
-  const txHash = await client.writeContract({
+  const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "judge",
     args: [claimId, evidence],
     value: 0n,
   });
-  await client.waitForTransactionReceipt({ hash: txHash, ...ACCEPTED });
+  await rpcWait(client, { hash: txHash, ...ACCEPTED });
   return txHash as string;
 }
 
@@ -58,7 +88,7 @@ export async function runJudge(judgeAddress: string, claimId: string, evidence: 
 export async function readVerdict(judgeAddress: string, claimId: string): Promise<Verdict> {
   const client = makeClient();
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const raw = await client.readContract({
+    const raw = await rpcRead(client, {
       address: judgeAddress as `0x${string}`,
       functionName: "get_verdict",
       args: [claimId],
@@ -76,15 +106,15 @@ export async function readPrice(
   coingeckoId: string,
 ): Promise<bigint> {
   const client = makeClient();
-  const txHash = await client.writeContract({
+  const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_price",
     args: [claimId, coingeckoId],
     value: 0n,
   });
-  await client.waitForTransactionReceipt({ hash: txHash, ...ACCEPTED });
+  await rpcWait(client, { hash: txHash, ...ACCEPTED });
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const raw = await client.readContract({
+    const raw = await rpcRead(client, {
       address: judgeAddress as `0x${string}`,
       functionName: "get_price",
       args: [claimId],
@@ -95,6 +125,59 @@ export async function readPrice(
   throw new Error(`No price read for claim ${claimId} after retries`);
 }
 
+/** Make the judge look the custodian up in a public knowledge source under consensus. */
+export async function readCustodian(
+  judgeAddress: string,
+  claimId: string,
+  entityName: string,
+): Promise<string> {
+  const client = makeClient();
+  const txHash = await rpcWrite(client, {
+    address: judgeAddress as `0x${string}`,
+    functionName: "read_custodian",
+    args: [claimId, entityName],
+    value: 0n,
+  });
+  await rpcWait(client, { hash: txHash, ...ACCEPTED });
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const raw = await rpcRead(client, {
+      address: judgeAddress as `0x${string}`,
+      functionName: "get_custodian",
+      args: [claimId],
+    });
+    if (raw) return raw as string;
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+  throw new Error(`No custodian lookup for claim ${claimId} after retries`);
+}
+
+/** Make the judge fetch the attestation document and verify its SHA-256 under consensus. */
+export async function readAttestation(
+  judgeAddress: string,
+  claimId: string,
+  url: string,
+  expectedSha256: string,
+): Promise<string> {
+  const client = makeClient();
+  const txHash = await rpcWrite(client, {
+    address: judgeAddress as `0x${string}`,
+    functionName: "read_attestation",
+    args: [claimId, url, expectedSha256],
+    value: 0n,
+  });
+  await rpcWait(client, { hash: txHash, ...ACCEPTED });
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const raw = await rpcRead(client, {
+      address: judgeAddress as `0x${string}`,
+      functionName: "get_attestation",
+      args: [claimId],
+    });
+    if (raw) return raw as string;
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+  throw new Error(`No attestation check for claim ${claimId} after retries`);
+}
+
 /** Cross-chain read: make the judge fetch a Casper reserve balance under consensus. */
 export async function readReserve(
   judgeAddress: string,
@@ -103,15 +186,15 @@ export async function readReserve(
   reservePublicKey: string,
 ): Promise<bigint> {
   const client = makeClient();
-  const txHash = await client.writeContract({
+  const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_reserve",
     args: [claimId, casperNodeUrl, reservePublicKey],
     value: 0n,
   });
-  await client.waitForTransactionReceipt({ hash: txHash, ...ACCEPTED });
+  await rpcWait(client, { hash: txHash, ...ACCEPTED });
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const raw = await client.readContract({
+    const raw = await rpcRead(client, {
       address: judgeAddress as `0x${string}`,
       functionName: "get_reserve",
       args: [claimId],
