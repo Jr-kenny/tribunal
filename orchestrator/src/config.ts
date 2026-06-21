@@ -16,7 +16,11 @@ export const config = {
   // GenLayer (network names: localnet | studionet | testnet-asimov | testnet-bradbury)
   genlayerNetwork: process.env.GENLAYER_NETWORK ?? "studionet",
   genlayerDeployerKeyPath: process.env.GENLAYER_DEPLOYER_KEY ?? "",
+  // one deployed FacetJudge per facet (the panel)
+  genlayerAuthenticityJudge: process.env.GENLAYER_AUTHENTICITY_JUDGE ?? "",
   genlayerSolvencyJudge: process.env.GENLAYER_SOLVENCY_JUDGE ?? "",
+  genlayerCustodianJudge: process.env.GENLAYER_CUSTODIAN_JUDGE ?? "",
+  genlayerValuationJudge: process.env.GENLAYER_VALUATION_JUDGE ?? "",
 } as const;
 
 export function requireEnv(name: keyof typeof config): string {
