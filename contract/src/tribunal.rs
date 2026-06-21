@@ -40,7 +40,8 @@ impl Tribunal {
     pub fn init(&mut self) {
         self.admin.set(self.env().caller());
         self.next_claim_id.set(0);
-        self.veto_threshold.set(6000);
+        // a median-reputation judge (starting 5000) can veto at ~0.80+ confidence
+        self.veto_threshold.set(4000);
         self.backed_threshold.set(7000);
         self.notbacked_threshold.set(4000);
         self.rep_step.set(500);
@@ -112,8 +113,10 @@ impl Tribunal {
     }
 
     /// Admin: resolve a claim against ground truth, scoring each judge on its
-    /// own facet. `truth_pass_facets` lists the facet ids that were actually true.
-    pub fn resolve_claim(&mut self, claim_id: u64, truth_pass_facets: Vec<u8>) {
+    /// own facet. `truth_pass_mask` is a bitmask where bit `facet_id` is set if
+    /// that facet was actually true. (A Vec<u8> arg is rejected by casper-types,
+    /// which wants the Bytes newtype, so a bitmask is used instead.)
+    pub fn resolve_claim(&mut self, claim_id: u64, truth_pass_mask: u64) {
         self.assert_admin();
         let step = self.rep_step.get_or_default();
         let floor = self.rep_floor.get_or_default();
@@ -121,7 +124,7 @@ impl Tribunal {
             let key = vkey(claim_id, fid);
             if self.verdict_present.get(&key).unwrap_or(false) {
                 let v = self.verdicts.get(&key).unwrap();
-                let truth_pass = truth_pass_facets.contains(&fid);
+                let truth_pass = (truth_pass_mask >> (fid as u64)) & 1 == 1;
                 let judge_pass = v.vote == Vote::Pass;
                 // Uncertain is neither a correct PASS nor a correct FAIL.
                 let correct = match v.vote {
@@ -161,4 +164,98 @@ pub enum Error {
     NotAdmin = 1,
     NotRegistered = 2,
     DuplicateVerdict = 3,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Tribunal;
+    use crate::types::{Vote, ClaimStatus};
+    use odra::host::{Deployer, NoArgs};
+
+    // facet ids used across the proof-of-reserves panel
+    const AUTHENTICITY: u8 = 1;
+    const SOLVENCY: u8 = 2;
+    const CUSTODIAN: u8 = 3;
+    const VALUATION: u8 = 4;
+
+    #[test]
+    fn solvency_fail_vetoes_full_claim() {
+        let env = odra_test::env();
+        let mut t = Tribunal::deploy(&env, NoArgs);
+
+        // deployer (account 0) is admin
+        let auth = env.get_account(1);
+        let solv = env.get_account(2);
+        let cust = env.get_account(3);
+        let val = env.get_account(4);
+
+        t.configure_facet(AUTHENTICITY, 1, false);
+        t.configure_facet(SOLVENCY, 1, true);
+        t.configure_facet(CUSTODIAN, 1, false);
+        t.configure_facet(VALUATION, 1, false);
+        for j in [auth, solv, cust, val] {
+            t.register_judge(j);
+        }
+
+        let claim = t.open_claim();
+
+        env.set_caller(auth);
+        t.submit_verdict(claim, AUTHENTICITY, Vote::Pass, 9200, String::from("gl:0xauth"));
+        env.set_caller(solv);
+        t.submit_verdict(claim, SOLVENCY, Vote::Fail, 8500, String::from("gl:0xsolv"));
+        env.set_caller(cust);
+        t.submit_verdict(claim, CUSTODIAN, Vote::Pass, 7000, String::from("gl:0xcust"));
+        env.set_caller(val);
+        t.submit_verdict(claim, VALUATION, Vote::Pass, 8800, String::from("gl:0xval"));
+
+        let status = t.finalize(claim);
+        assert_eq!(status, ClaimStatus::NotBacked);
+        assert_eq!(t.get_status(claim), ClaimStatus::NotBacked);
+        // the per-facet breakdown is retained on-chain
+        let v = t.get_verdict(claim, SOLVENCY).unwrap();
+        assert_eq!(v.vote, Vote::Fail);
+        assert_eq!(v.genlayer_proof, String::from("gl:0xsolv"));
+    }
+
+    #[test]
+    fn resolution_rewards_correct_and_slashes_wrong_judges() {
+        let env = odra_test::env();
+        let mut t = Tribunal::deploy(&env, NoArgs);
+
+        let auth = env.get_account(1);
+        let solv = env.get_account(2);
+        let cust = env.get_account(3);
+        let val = env.get_account(4);
+
+        t.configure_facet(AUTHENTICITY, 1, false);
+        t.configure_facet(SOLVENCY, 1, true);
+        t.configure_facet(CUSTODIAN, 1, false);
+        t.configure_facet(VALUATION, 1, false);
+        for j in [auth, solv, cust, val] {
+            t.register_judge(j);
+        }
+        assert_eq!(t.get_reputation(solv), 5000); // starting reputation
+
+        let claim = t.open_claim();
+        env.set_caller(auth);
+        t.submit_verdict(claim, AUTHENTICITY, Vote::Pass, 9000, String::from("gl:a"));
+        env.set_caller(solv);
+        t.submit_verdict(claim, SOLVENCY, Vote::Fail, 9000, String::from("gl:s"));
+        env.set_caller(cust);
+        t.submit_verdict(claim, CUSTODIAN, Vote::Fail, 9000, String::from("gl:c"));
+        env.set_caller(val);
+        t.submit_verdict(claim, VALUATION, Vote::Pass, 9000, String::from("gl:v"));
+
+        // ground truth: facets 1, 3, 4 were actually true, solvency (2) really failed.
+        // so solvency's FAIL is correct, but custodian's FAIL is wrong (3 was true).
+        // mask with bits 1, 3, 4 set = 2 + 8 + 16 = 26.
+        let truth_mask: u64 = (1 << AUTHENTICITY) | (1 << CUSTODIAN) | (1 << VALUATION);
+        env.set_caller(env.get_account(0)); // admin
+        t.resolve_claim(claim, truth_mask);
+
+        assert_eq!(t.get_reputation(solv), 5500); // correct FAIL -> up
+        assert_eq!(t.get_reputation(auth), 5500); // correct PASS -> up
+        assert_eq!(t.get_reputation(val), 5500);  // correct PASS -> up
+        assert_eq!(t.get_reputation(cust), 4500); // wrong FAIL -> slashed
+    }
 }
