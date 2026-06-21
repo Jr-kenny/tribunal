@@ -1,0 +1,16 @@
+# secrets and keys, never commit
+.env
+.env.local
+.keys/
+**/secret_key.pem
+
+# node
+node_modules/
+dist/
+
+# rust
+contract/target/
+contract/wasm/
+
+# os
+.DS_Store

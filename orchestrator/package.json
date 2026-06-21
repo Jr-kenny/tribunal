@@ -1,0 +1,20 @@
+{
+  "name": "tribunal-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "casper-js-sdk": "^5.0.12",
+    "dotenv": "^16.4.5",
+    "genlayer-js": "^1.1.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
