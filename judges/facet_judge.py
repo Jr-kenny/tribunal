@@ -119,7 +119,19 @@ def _read_casper_balance(node_url: str, public_key_hex: str) -> int:
     return gl.eq_principle.strict_eq(fetch)
 
 
-def _build_prompt(facet_name: str, rubric: str, evidence: str) -> str:
+def _build_prompt(facet_name: str, rubric: str, evidence: str, verified_reserve_motes=None) -> str:
+    verified_block = ""
+    if verified_reserve_motes is not None:
+        # 1 CSPR = 1_000_000_000 motes. Integer-only to stay deterministic.
+        cspr = int(verified_reserve_motes) // 1_000_000_000
+        verified_block = f"""
+
+VERIFIED ON-CHAIN RESERVE (read live from the Casper chain by the validators
+under consensus, not supplied by the issuer). This is ground truth for what the
+reserve wallet actually holds. Trust THIS over any reserve figure stated in the
+evidence above, even if the evidence claims a larger amount:
+{verified_reserve_motes} motes ({cspr} CSPR)
+"""
     return f"""You are a specialist verification judge on a panel. You assess ONLY one
 facet of a real-world-asset claim and nothing else.
 
@@ -128,11 +140,12 @@ Your rubric (the only question you answer):
 {rubric}
 
 Evidence provided for this claim:
-{evidence}
+{evidence}{verified_block}
 
 Decide PASS (the facet holds), FAIL (it does not), or UNCERTAIN (the evidence is
-insufficient to decide). Do not stray outside your facet. Base the decision only
-on the evidence above.
+insufficient to decide). Do not stray outside your facet. Base the decision on the
+evidence above, and where a verified on-chain reserve is given, treat it as the
+real reserve regardless of what the issuer's paperwork claims.
 
 Respond with strict JSON and nothing else:
 {{"vote": "PASS|FAIL|UNCERTAIN", "confidence": <integer 0-100>, "reason": "<one or two sentences>"}}"""
@@ -150,7 +163,7 @@ class FacetJudge(gl.Contract):
     def __init__(self, facet_name: str, rubric: str):
         self.facet_name = facet_name
         self.rubric = rubric
-        self.owner = gl.message.sender_account
+        self.owner = gl.message.sender_address
 
     @gl.public.view
     def get_reserve(self, claim_id: str) -> str:
@@ -179,9 +192,13 @@ class FacetJudge(gl.Contract):
         """Render this facet's verdict on a claim via GenLayer consensus and store it."""
         facet_name = self.facet_name
         rubric = self.rubric
+        # If the reserve was read live from Casper for this claim, hand that
+        # verified balance to the judge as ground truth so the verdict is decided
+        # against the chain, not against a self-reported number in the evidence.
+        verified = self.reserves[claim_id] if claim_id in self.reserves else None
 
         def leader_fn():
-            prompt = _build_prompt(facet_name, rubric, evidence)
+            prompt = _build_prompt(facet_name, rubric, evidence, verified)
             analysis = gl.nondet.exec_prompt(prompt, response_format="json")
             return _normalize_verdict(analysis)
 

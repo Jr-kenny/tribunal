@@ -5,7 +5,7 @@
 // GenLayer provably attested. GenLayer is the trust-minimized judge; Casper is
 // the registry, federation, and economic settlement layer.
 
-import { runJudge, readVerdict } from "./genlayer.js";
+import { runJudge, readVerdict, readReserve } from "./genlayer.js";
 import { submitVerdict, finalize } from "./casper.js";
 import { config } from "./config.js";
 
@@ -29,7 +29,17 @@ export async function relaySolvency(claimId: number, evidence: string): Promise<
   const judge = config.genlayerSolvencyJudge;
   if (!judge) throw new Error("Missing GENLAYER_SOLVENCY_JUDGE address");
 
-  // 1. GenLayer renders the verdict under consensus; we keep its tx hash as proof.
+  // 1. Solvency is about the actual money in the wallet, so first have the judge
+  // read the reserve balance live off Casper under consensus. The verdict then
+  // decides against the chain, not against any reserve figure in the paperwork.
+  const reserveWallet = JSON.parse(evidence).reserve_wallet as string | undefined;
+  if (reserveWallet) {
+    console.log(`[relay] reading reserve wallet ${reserveWallet} live from Casper...`);
+    const motes = await readReserve(judge, String(claimId), config.casperPublicNodeUrl, reserveWallet);
+    console.log(`[relay] verified on-chain reserve: ${motes} motes (${motes / 1_000_000_000n} CSPR)`);
+  }
+
+  // 2. GenLayer renders the verdict under consensus; we keep its tx hash as proof.
   console.log(`[relay] running GenLayer solvency judge on claim ${claimId}...`);
   const genlayerTx = await runJudge(judge, String(claimId), evidence);
   console.log(`[relay] GenLayer verdict accepted, tx ${genlayerTx}`);

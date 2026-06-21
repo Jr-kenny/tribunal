@@ -1,0 +1,8 @@
+{
+  "asset": "Token XYZ - tokenized US T-bill fund",
+  "stated_liabilities_usd": 10000000,
+  "reserve_wallet": "016c7e59de3b380b62cd1a65c63fb0c2a54be80e8cb9aee92b833d77776fcd5dc6",
+  "reported_reserves_usd": 12500000,
+  "attestation": "Issuer attests FULL backing with a 25% over-collateralization buffer as of 2026-06-21. Reserves of $12.5M comfortably exceed the $10M in stated liabilities; independent custody confirmed.",
+  "note": "The paperwork LIES - it claims over-collateralized backing. The reserve wallet actually holds only ~2687 CSPR on-chain. A judge reading the chain must FAIL this; a judge trusting the paperwork would wrongly PASS."
+}
