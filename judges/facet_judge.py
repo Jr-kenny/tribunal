@@ -370,14 +370,12 @@ class FacetJudge(gl.Contract):
             raise gl.vm.UserError(f"{ERROR_EXPECTED} no verdict for claim {claim_id}")
         return self.verdicts[claim_id]
 
-    @gl.public.write
-    def judge(self, claim_id: str, evidence: str) -> None:
-        """Render this facet's verdict on a claim via GenLayer consensus and store it."""
-        facet_name = self.facet_name
-        rubric = self.rubric
-        # If the reserve was read live from Casper for this claim, hand that
-        # verified balance to the judge as ground truth so the verdict is decided
-        # against the chain, not against a self-reported number in the evidence.
+    def _render_and_store(self, claim_id: str, facet_name: str, rubric: str, evidence: str) -> None:
+        """Run consensus on one facet question and store the verdict. Shared by the
+        fixed-rubric `judge` and the per-claim-rubric `judge_with_rubric`, so the
+        same judge can answer its hardcoded treasury question or a question the
+        feeder wrote for an arbitrary claim. Any verified blocks read for this claim
+        (reserve, price, custodian, attestation) are still folded in if present."""
         verified = self.reserves[claim_id] if claim_id in self.reserves else None
         price = self.prices[claim_id] if claim_id in self.prices else None
         custodian = json.loads(self.custodians[claim_id]) if claim_id in self.custodians else None
@@ -403,3 +401,14 @@ class FacetJudge(gl.Contract):
 
         verdict = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         self.verdicts[claim_id] = json.dumps(verdict)
+
+    @gl.public.write
+    def judge(self, claim_id: str, evidence: str) -> None:
+        """Render this facet's verdict using its own fixed rubric (treasury panel)."""
+        self._render_and_store(claim_id, self.facet_name, self.rubric, evidence)
+
+    @gl.public.write
+    def judge_with_rubric(self, claim_id: str, evidence: str, facet_name: str, rubric: str) -> None:
+        """Render a verdict on a question supplied per-claim, so this judge can
+        assess a facet of any claim type, not just its hardcoded treasury one."""
+        self._render_and_store(claim_id, facet_name, rubric, evidence)

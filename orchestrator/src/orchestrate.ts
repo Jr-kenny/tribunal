@@ -6,7 +6,7 @@
 // judges provably attested. GenLayer is the trust-minimized judge; Casper is the
 // registry, federation, and economic settlement layer.
 
-import { runJudge, readVerdict, readReserve, readPrice, readCustodian, readAttestation } from "./genlayer.js";
+import { runJudge, runJudgeWithRubric, readVerdict, readReserve, readPrice, readCustodian, readAttestation } from "./genlayer.js";
 import { submitVerdict, finalize } from "./casper.js";
 import { confirm } from "./chainread.js";
 import { config } from "./config.js";
@@ -37,6 +37,43 @@ export const FACETS: FacetSpec[] = [
   { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge, casperKey: JUDGE_KEY("custodian"), genlayerKey: GL_KEY("custodian"), readsCustodian: true },
   { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, casperKey: JUDGE_KEY("valuation"), genlayerKey: GL_KEY("valuation"), readsPrice: true },
 ];
+
+// The four checks as general verification dimensions, used for any claim that
+// isn't proof-of-reserves. Each maps onto one of the existing judges, so the panel
+// stays four distinct specialists; only the question is written per claim. This is
+// the "receptionist" writing each judge's question for an arbitrary claim.
+const GENERAL_QUESTIONS: Record<string, { facetName: string; rubric: string }> = {
+  authenticity: {
+    facetName: "Provenance",
+    rubric:
+      "Is the documentation or source behind this claim genuine, internally consistent, and credible? PASS if the evidence looks authentic and well-formed; FAIL if it shows signs of fabrication, tampering, or contradiction; UNCERTAIN if it cannot be assessed from the evidence.",
+  },
+  solvency: {
+    facetName: "Core truth",
+    rubric:
+      "Is the central factual claim actually true given the evidence? This is the heart of the claim. PASS only if the evidence substantiates it; FAIL if the evidence contradicts or fails to support it; UNCERTAIN if it cannot be determined.",
+  },
+  custodian: {
+    facetName: "Counterparty",
+    rubric:
+      "Are the people, companies, or entities named in this claim real and legitimate? PASS if they are recognizable and clean; FAIL if they appear fabricated, flagged, or sanctioned; UNCERTAIN if they cannot be evaluated.",
+  },
+  valuation: {
+    facetName: "Consistency",
+    rubric:
+      "Do the figures, amounts, and values in this claim hold up and make internal and market sense? PASS if consistent and plausible; FAIL if materially inflated, contradictory, or unsupported; UNCERTAIN if there is nothing to check against.",
+  },
+};
+
+/** A treasury / proof-of-reserves claim is one that names a reserve wallet; those
+ * get the specialist on-chain reads. Anything else is judged generically. */
+function isTreasuryClaim(evidence: string): boolean {
+  try {
+    return Boolean(JSON.parse(evidence).reserve_wallet);
+  } catch {
+    return false;
+  }
+}
 
 export interface FacetResult {
   facet: string;
@@ -137,15 +174,44 @@ export async function judgeFacet(
   };
 }
 
-/** Run every configured facet judge on a claim, then finalize once on Casper. */
+/** Run one facet generically: a per-claim question (no specialist on-chain reads),
+ * for claim types beyond proof-of-reserves. */
+export async function judgeFacetGeneric(
+  spec: FacetSpec,
+  claimId: number,
+  evidence: string,
+  onEvent: OnEvent = noop,
+): Promise<FacetResult> {
+  if (!spec.judge) throw new Error(`No judge address configured for facet "${spec.key}"`);
+  onEvent({ type: "facet-started", facet: spec.key });
+  const q = GENERAL_QUESTIONS[spec.key];
+  console.log(`[${spec.key}] judging "${q.facetName}" (generic) on claim ${claimId}...`);
+  const genlayerTx = await runJudgeWithRubric(spec.judge, String(claimId), evidence, q.facetName, q.rubric, spec.genlayerKey);
+  const verdict = await readVerdict(spec.judge, String(claimId), spec.genlayerKey);
+  console.log(`[${spec.key}] ${verdict.vote} @ ${verdict.confidence}bps - ${verdict.reason}`);
+  onEvent({ type: "facet-verdict", facet: spec.key, vote: verdict.vote, confidence: verdict.confidence, reason: verdict.reason, genlayerTx });
+  const submitTx = await submitVerdict(claimId, spec.facetId, verdict.vote, verdict.confidence, genlayerTx, spec.casperKey);
+  onEvent({ type: "facet-submitted", facet: spec.key, submitTx });
+  return { facet: spec.key, facetId: spec.facetId, genlayerTx, vote: verdict.vote, confidence: verdict.confidence, reason: verdict.reason, submitTx };
+}
+
+/** Run every configured facet judge on a claim, then finalize once on Casper.
+ * Treasury claims get the specialist on-chain reads + their fixed rubrics; any
+ * other claim is judged generically against the four general questions. */
 export async function relayPanel(claimId: number, evidence: string, onEvent: OnEvent = noop): Promise<PanelResult> {
   const configured = FACETS.filter((f) => f.judge);
   if (configured.length === 0) throw new Error("No facet judges configured (set the GENLAYER_*_JUDGE env vars)");
 
+  const generic = !isTreasuryClaim(evidence);
+  console.log(`[panel] claim ${claimId}: ${generic ? "generic (beyond treasury)" : "proof-of-reserves"} path`);
+  const runOne = generic
+    ? (spec: FacetSpec) => judgeFacetGeneric(spec, claimId, evidence, onEvent)
+    : (spec: FacetSpec) => judgeFacet(spec, claimId, evidence, onEvent);
+
   // Run all judges at once. Each has its own GenLayer account and its own Casper
   // key, so there's no shared nonce to serialize on; allSettled means one judge
   // failing doesn't sink the others.
-  const settled = await Promise.allSettled(configured.map((spec) => judgeFacet(spec, claimId, evidence, onEvent)));
+  const settled = await Promise.allSettled(configured.map(runOne));
   const facets: FacetResult[] = [];
   settled.forEach((r, i) => {
     if (r.status === "fulfilled") {

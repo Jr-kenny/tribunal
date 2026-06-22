@@ -22,10 +22,10 @@ all execute cleanly on testnet (verified on the receipts, not just ACCEPTED).
 
 One deployed FacetJudge per facet, each code-verified on-chain (`genlayer code`):
 
-- Authenticity: `0xCC17Ce06bC61c65fea6662e3ECf35f78AED0371e`
-- Solvency: `0x324f3e4F53AEF007fAB346dee9b04Ee2f6194b2b`
-- Custodian: `0x1072595Ba4a0d208cF5DF12d056b5f7552055340`
-- Valuation: `0x6f57d0e8Fe5F6B23b4C0c87aBeeBBC7eFB80Cb1F`
+- Authenticity: `0xbC694BEb00Afb616B03C1F9d33e1c5972dB92F7E`
+- Solvency: `0x95Ebac70f5a1dEc310586eF6292097A48bDe64b8`
+- Custodian: `0x89702F3113F2E9a2430a902ed2ab1Ac13970291B`
+- Valuation: `0xf56B39c091Ec6D112Cb3dF372aCcB83a1f8055C4`
 
 All four facets now fetch their own truth under GenLayer consensus, each matched
 to the right equivalence rule for its source:

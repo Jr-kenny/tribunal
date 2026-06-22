@@ -105,6 +105,27 @@ export async function runJudge(judgeAddress: string, claimId: string, evidence: 
   return txHash as string;
 }
 
+/** Run the judge on a claim with a per-claim question (rubric), for claim types
+ * beyond treasury. Returns the GenLayer tx hash. */
+export async function runJudgeWithRubric(
+  judgeAddress: string,
+  claimId: string,
+  evidence: string,
+  facetName: string,
+  rubric: string,
+  genlayerKeyPath?: string,
+): Promise<string> {
+  const client = makeClient(genlayerKeyPath);
+  const txHash = await rpcWrite(client, {
+    address: judgeAddress as `0x${string}`,
+    functionName: "judge_with_rubric",
+    args: [claimId, evidence, facetName, rubric],
+    value: 0n,
+  });
+  await rpcWait(client, { hash: txHash, ...ACCEPTED });
+  return txHash as string;
+}
+
 /** Read the verdict the judge stored, retrying while it settles to accepted state. */
 export async function readVerdict(judgeAddress: string, claimId: string, genlayerKeyPath?: string): Promise<Verdict> {
   const client = makeClient(genlayerKeyPath);

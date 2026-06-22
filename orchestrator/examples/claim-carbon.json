@@ -1,0 +1,9 @@
+{
+  "asset": "Verra VCS-1234 carbon credit retirement",
+  "claim": "10,000 tonnes of CO2 offsets from the Rimba Raya REDD+ project were permanently retired on behalf of Acme Corp in Q1 2026.",
+  "registry": "Verra",
+  "project": "Rimba Raya Biodiversity Reserve",
+  "counterparty": "Acme Corp",
+  "quantity_tonnes": 10000,
+  "note": "A non-treasury claim: there is no reserve wallet, so the panel judges it generically across the four general dimensions (provenance, core truth, counterparty, consistency) rather than the proof-of-reserves checks."
+}

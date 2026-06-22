@@ -9,7 +9,7 @@ A panel of specialist GenLayer judges each checks one facet of a real-world-asse
 ![Casper Testnet](https://img.shields.io/badge/Casper-Testnet-red)
 ![Odra 2.8](https://img.shields.io/badge/Odra-2.8-orange)
 ![GenLayer](https://img.shields.io/badge/GenLayer-judges-blueviolet)
-![Contract tests](https://img.shields.io/badge/contract%20tests-13%20passing-brightgreen)
+![Contract tests](https://img.shields.io/badge/contract%20tests-15%20passing-brightgreen)
 
 Built for the Casper Agentic Buildathon 2026.
 
@@ -194,10 +194,10 @@ One deployed `FacetJudge` per facet, each code-verified on-chain:
 
 | Facet | GenLayer address |
 |-------|------------------|
-| Authenticity | `0xCC17Ce06bC61c65fea6662e3ECf35f78AED0371e` |
-| Solvency | `0x324f3e4F53AEF007fAB346dee9b04Ee2f6194b2b` |
-| Custodian | `0x1072595Ba4a0d208cF5DF12d056b5f7552055340` |
-| Valuation | `0x6f57d0e8Fe5F6B23b4C0c87aBeeBBC7eFB80Cb1F` |
+| Authenticity | `0xbC694BEb00Afb616B03C1F9d33e1c5972dB92F7E` |
+| Solvency | `0x95Ebac70f5a1dEc310586eF6292097A48bDe64b8` |
+| Custodian | `0x89702F3113F2E9a2430a902ed2ab1Ac13970291B` |
+| Valuation | `0xf56B39c091Ec6D112Cb3dF372aCcB83a1f8055C4` |
 
 ## Runs on Testnet
 
