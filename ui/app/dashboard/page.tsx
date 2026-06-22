@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ClaimForm } from "@/components/ClaimForm";
+import { ClaimForm, CUSTOM_TEMPLATE } from "@/components/ClaimForm";
 import { JudgePanel } from "@/components/JudgePanel";
 import { VerdictCard } from "@/components/VerdictCard";
 import { ReputationBoard } from "@/components/ReputationBoard";
@@ -27,6 +27,7 @@ function whyLine(status: ClaimStatus, views: Record<string, JudgeView>): string 
 
 export default function DashboardPage() {
   const [claimKey, setClaimKey] = useState("claim-lying");
+  const [evidence, setEvidence] = useState(CUSTOM_TEMPLATE);
   const [running, setRunning] = useState(false);
   const [views, setViews] = useState<Record<string, JudgeView>>(FRESH);
   const [claimId, setClaimId] = useState<number | null>(null);
@@ -40,6 +41,20 @@ export default function DashboardPage() {
     setViews((v) => ({ ...v, [facet]: { ...v[facet], ...p } }));
 
   async function onRun() {
+    // a custom claim ships raw evidence; validate it's JSON before opening anything on-chain
+    let body: { claimKey?: string; evidence?: string };
+    if (claimKey === "custom") {
+      try {
+        JSON.parse(evidence);
+      } catch {
+        setError("Custom claim isn't valid JSON. Fix it and run again.");
+        return;
+      }
+      body = { evidence };
+    } else {
+      body = { claimKey };
+    }
+
     setRunning(true);
     setViews(FRESH);
     setStatus(null);
@@ -48,7 +63,7 @@ export default function DashboardPage() {
     setOpenTx(null);
     setError(null);
 
-    await runClaim({ claimKey }, (e: StreamEvent) => {
+    await runClaim(body, (e: StreamEvent) => {
       switch (e.type) {
         case "claim-opened":
           setClaimId(e.claimId);
@@ -104,7 +119,14 @@ export default function DashboardPage() {
         Each judge fetches its own truth, submits its verdict, and the contract federates them.
       </p>
 
-      <ClaimForm value={claimKey} onChange={setClaimKey} onRun={onRun} running={running} />
+      <ClaimForm
+        claimKey={claimKey}
+        onClaimKey={setClaimKey}
+        evidence={evidence}
+        onEvidence={setEvidence}
+        onRun={onRun}
+        running={running}
+      />
 
       {(claimId != null || openTx) && (
         <p className="dim" style={{ fontSize: 13, margin: "12px 2px 0" }}>
