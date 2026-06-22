@@ -53,6 +53,21 @@ export async function openClaim(): Promise<string> {
   return call("open_claim", C.Args.fromMap({}));
 }
 
+/** Open a claim as a registry record (asset + evidence pointer), emitting ClaimOpened. */
+export async function openClaimWithEvidence(
+  asset: string,
+  evidenceUri: string,
+  evidenceHash: string,
+  keyPath?: string,
+): Promise<string> {
+  const args = C.Args.fromMap({
+    asset: C.CLValue.newCLString(asset),
+    evidence_uri: C.CLValue.newCLString(evidenceUri),
+    evidence_hash: C.CLValue.newCLString(evidenceHash),
+  });
+  return call("open_claim_with_evidence", args, keyPath);
+}
+
 /** Submit a facet verdict carrying the GenLayer tx hash as proof. */
 export async function submitVerdict(
   claimId: number,
