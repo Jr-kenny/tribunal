@@ -6,8 +6,8 @@
 // we just read each slot's current value via query_global_state and decode the
 // stored u32 (basis points). No transaction, no mutation: a plain on-chain read.
 
-import { readFileSync } from "node:fs";
 import { config } from "./config.js";
+import { JUDGE_REP_MAP } from "./judge-rep-map.js";
 
 export interface JudgeReputation {
   key: string; // facet key: authenticity | solvency | custodian | valuation
@@ -15,9 +15,7 @@ export interface JudgeReputation {
 }
 
 function repMap(): Record<string, string> {
-  // committed next to the orchestrator package root
-  const url = new URL("../judge-rep-map.json", import.meta.url);
-  return JSON.parse(readFileSync(url, "utf8"));
+  return JUDGE_REP_MAP;
 }
 
 /** Decode the Odra-stored u32 from a dictionary item's CLValue bytes.
