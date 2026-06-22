@@ -5,23 +5,25 @@ Author: Kenny (jr-kenny)
 
 ## What we're building
 
-Turn Tribunal from an on-demand verifier into a standing, public on-chain
-**registry of real-world-asset claims and the panel's verdict on each**, fed by a
-permissionless intake and judged autonomously by a watcher. Anyone can browse the
-registry ("here are the RWA claims and what the tribunal ruled"), anyone can add a
-claim, and the panel reacts on its own.
+Turn Tribunal from an on-demand, treasury-only verifier into a standing, public
+on-chain **registry of real-world-asset claims and the panel's verdict on each**,
+fed by a permissionless intake (including an automated feeder), judged
+autonomously, and able to handle claims beyond proof-of-reserves. Anyone can
+browse the registry ("here are the claims and what the tribunal ruled"), anyone or
+the feeder can add a claim, and the panel reacts on its own.
 
 The Casper contract is the registry. Events are the backbone. The watcher is the
-engine. The intake has two doors. The GenLayer judges and the relay logic do not
-change.
+engine. The intake has three doors (direct call, website form, automated feeder).
+The four judges become general verification checks, not treasury-specific ones.
 
 ## The shape
 
 ```
 registry (the browsable thing)
   ← events (ClaimOpened / ClaimFinalized, read via CSPR.cloud)
-    ← intake (two doors: direct contract call, or the website form)
+    ← intake (three doors: direct contract call, website form, automated feeder)
     ← watcher (reacts to ClaimOpened, runs the panel, finalizes)
+      ← four general checks, with per-claim questions written by the feeder/decomposer
 ```
 
 ## Components
@@ -61,10 +63,11 @@ A standalone long-running service that reuses the existing relay:
 - Dedup/idempotency: skip any claim whose on-chain status is already non-Open; persist the cursor so a restart never re-judges.
 - Hostable on Render (with an UptimeRobot keep-alive) for true 24/7 autonomy, or run locally during a demo. This is the only always-on piece.
 
-### 4. Intake, the two doors
+### 4. Intake, the three doors
 
 - **Direct (permissionless):** anyone calls `open_claim_with_evidence` from any wallet/script, pointing at a publicly hosted evidence JSON (same shape as the example claims). The watcher picks it up.
-- **Website:** a "Submit to the registry" form that takes the asset name and a public evidence URL (same JSON shape as the example claims). The route fetches that URL to compute its hash, then calls `open_claim_with_evidence` with the asset, URL, and hash. No server-side file hosting is needed (which also keeps it Vercel-friendly); hosting the JSON on the user's behalf is a later convenience, out of scope now.
+- **Website:** a "Submit to the registry" form that takes the asset name and a public evidence URL (same JSON shape as the example claims). The route fetches that URL to compute its hash, then calls `open_claim_with_evidence` with the asset, URL, and hash. No server-side file hosting is needed (which also keeps it Vercel-friendly).
+- **Automated feeder:** a service that periodically scans configured sources and files claims on its own. Detailed in section 7.
 
 ### 5. The Registry page (frontend, read-only)
 
@@ -73,14 +76,49 @@ A new `/registry` page lists every claim from the event log: asset, status
 drill-in to the per-facet breakdown. Pure read, no keys, works on Vercel exactly
 like the reputation board.
 
-### 6. GenLayer judges
+### 6. The four checks are general, not treasury-specific
 
-Unchanged. The watcher drives them identically to the dashboard.
+The four judges stop being treasury fields and become four general dimensions of
+verification that fit almost any claim:
+
+- **Provenance** — is the underlying document/source genuine? (today's authenticity)
+- **Core truth** — is the central factual claim actually true? (for treasury this is solvency reading the reserve; for another claim it's the heart of that claim)
+- **Counterparty** — are the named people/entities real and legitimate? (today's custodian)
+- **Consistency / valuation** — do the numbers and values hold up? (today's valuation)
+
+The judge *mechanics* don't change (same contract, same four judge contracts, same
+parallel run). What changes is that each judge's question (rubric) is written
+per-claim instead of hardcoded to treasury. For a treasury claim those four come
+out exactly as today; for a different claim they come out phrased for that claim.
+Each judge still owns a distinct dimension, so no two judges do the same work, and
+reputation keeps meaning ("good at provenance checks" across all claim types).
+
+"Core truth" is the default critical (veto) dimension, the way solvency is for
+treasury. Trust varies with evidence: a treasury core-truth check gets the exact
+on-chain reserve read; an arbitrary claim's core-truth check leans on the generic
+web read, so the panel honestly returns lower confidence when evidence is softer.
+
+### 7. The automated feeder (the third door)
+
+A service (off-chain, optionally backed by GenLayer web-reads under consensus, so
+the discovery itself is trust-minimized) that:
+
+1. **Scans** configured sources on an interval (e.g. the last hour of activity in the Casper ecosystem / a set of feeds) for things that look like verifiable claims.
+2. **Frames** each candidate into the four general checks (writes provenance / core-truth / counterparty / consistency questions for it) and points each at its evidence. This framing is stored on-chain with the claim, so what was asked is always auditable, not a black box.
+3. **Two-stage on ambiguity:** clear candidates are filed straight away; ambiguous ones trigger a deeper research pass (pull more detail) before filing, or are dropped if they can't be made into a real claim.
+4. **Files** the framed claim via `open_claim_with_evidence`, after which the watcher and judges take over.
+
+Crucially, **the feeder doesn't need to be perfect, because the judges are the
+backstop.** It only frames and files; the panel independently verifies. A sloppy
+or manipulated framing can at worst produce an UNCERTAIN/FAIL, never a false
+BACKED, so the system fails soft. The feeder needs no special identity (anonymous
+or its own key, either works). At volume it should throttle; the ambiguity gate
+already filters a lot of noise.
 
 ## Data flow
 
-1. A claim is registered (direct call or via the site) → `ClaimOpened` event.
-2. The watcher sees the event → fetches + verifies the evidence → runs the four judges in parallel → submits verdicts → `finalize` → `ClaimFinalized` event.
+1. A claim is registered, by a person (direct call or site form) or by the feeder (which scans, frames it into the four checks, researches if ambiguous, then files) → `ClaimOpened` event carrying the framing.
+2. The watcher sees the event → fetches + verifies the evidence → runs the four judges in parallel, each on its own dimension's question → submits verdicts → `finalize` → `ClaimFinalized` event.
 3. The Registry page and reputation board read the events/chain to display the live state.
 
 ## Error handling
@@ -99,13 +137,19 @@ Unchanged. The watcher drives them identically to the dashboard.
 
 ## Sequencing (for the plan)
 
-1. Contract: add the evidence entry point + events, HostEnv tests, deploy (upgrade or redeploy + re-seed).
+Each slice ships on its own; the order keeps risk and dependencies sane (it is not
+a statement about how long any of it takes).
+
+1. Contract: add the evidence entry point + events, HostEnv tests, deploy (upgrade or redeploy + re-seed). Concrete consequence: a redeploy resets the reputation board, so we re-seed it as part of this step.
 2. Events client + Registry read page (read-only, shippable on its own).
-3. Watcher service (autonomous judging).
-4. Website intake form (+ evidence hosting route).
+3. Watcher service (autonomous judging of registered claims).
+4. Website intake form.
+5. Generalize the questions: the per-claim decomposer writes the four checks' rubrics, proven by judging one clearly non-treasury claim end to end.
+6. Automated feeder (scan → frame → research-if-ambiguous → file), building on the decomposer from step 5.
 
 ## Out of scope (now)
 
-- An automatic external "news"/data feed that auto-creates claims from public RWA sources (a future feeder; the registry fills from submissions for now).
+- A specific curated source list for the feeder is chosen at build time (the feeder is source-agnostic; pointing it at good sources is config, not architecture).
 - Spam / sybil controls beyond what testnet needs.
 - A "rejected" claim status for hash mismatches (logged for now).
+- Hosting a submitter's evidence JSON on their behalf (the site takes a public URL for now).
