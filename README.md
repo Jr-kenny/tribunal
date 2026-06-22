@@ -183,8 +183,8 @@ This ran live on Testnet (claim 13). Four judges submitted, the claim finalized 
 
 Tribunal contract (the federation + reputation oracle):
 
-- Package hash: `hash-5ee74e27aeee192f6c4fe9fb82ae99ffa14d3986288359fef58e61f520151a19`
-- Install tx: https://testnet.cspr.live/transaction/2f2f398f4cbf3a4e2d8e91dec6512e115613aeb63f06a579825358b7e0de35e2
+- Package hash: `hash-d6c8b87c8e201265ec4f5f32dc0f01f36adb13a93a4a659ed29740c020afb5bd`
+- Install tx: https://testnet.cspr.live/transaction/43fd9bcea5963093b447c0f137058ebc614644127b3c5f2c157b1c4b154b1f97
 
 All four facets are configured and each judge is registered with its own Casper key. `open_claim`, `submit_verdict`, `finalize`, and `resolve_claim` all execute cleanly on Testnet (verified on the receipts, not just ACCEPTED).
 

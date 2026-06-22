@@ -3,8 +3,8 @@
 // The slots are stable, so this is committed and imported directly (no fs, so it
 // works the same under tsx and the Next bundler).
 export const JUDGE_REP_MAP: Record<string, string> = {
-  authenticity: "4625df520d29030484cbdffe1ef0a5c33f4dff8028d04289c61f7afc3c389245",
-  solvency: "0b58f6268cec4b1da08e6e78e24fcc0689bcdb2da3ae36e74e846664ae0e6ca3",
-  custodian: "2cf2cf07b0d383cf7361328c21a117ba9c4b59eada0b4721be30d58f6b84ecd2",
-  valuation: "57e86dce084bde49cdc566178f75c544d21c5152fb5711fbda666a5cfd2a9127",
+  authenticity: "ef2c6eb7fd0891538bbb6338e38e3d9efcdd9ae914dac65bde50734f5f27c580",
+  solvency: "92fb5ca4c41f4b0b3b821b6e83b16246a3f7aa23b16330a62202cec511679f60",
+  custodian: "2cabee0a295c35a013d73f3b5542ca759fc3644da1ce6ee58df5172a5f68740e",
+  valuation: "66df778618dc4bddcf59c036d9aba9b12d75d29773fb6d9461f7315e967f37bc",
 };

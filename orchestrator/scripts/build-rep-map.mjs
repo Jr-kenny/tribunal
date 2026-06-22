@@ -47,13 +47,17 @@ const map = {};
 for (const h of hashes) {
   let detail;
   try {
-    detail = await cc(`/deploys/${h}?fields=args,entry_point`);
+    detail = await cc(`/deploys/${h}?fields=args,entry_point,contract_package`);
   } catch {
     continue;
   }
   const d = detail.data || detail;
   // register_judge is the only entry point whose args carry a `judge` key.
   if (!d.args || !("judge" in d.args)) continue;
+  // only the current contract: a redeploy leaves stale register txs against the
+  // old package, whose reputation slots no longer apply.
+  const pkg = (process.env.TRIBUNAL_CONTRACT_HASH || "").replace(/^hash-/, "").toLowerCase();
+  if (pkg && String(d.contract_package_hash || "").toLowerCase() !== pkg) continue;
   const judgeRaw = String(d.args?.judge?.parsed ?? "").replace(/^account-hash-/, "").toLowerCase();
   const facet = byHash[judgeRaw];
   if (!facet) continue;

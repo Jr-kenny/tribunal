@@ -1,6 +1,6 @@
-last_updated = "2026-06-21T13:14:23Z"
+last_updated = "2026-06-22T18:24:19Z"
 
 [[contracts]]
 name = "Tribunal"
 package_name = "Tribunal"
-package_hash = "hash-5ee74e27aeee192f6c4fe9fb82ae99ffa14d3986288359fef58e61f520151a19"
+package_hash = "hash-d6c8b87c8e201265ec4f5f32dc0f01f36adb13a93a4a659ed29740c020afb5bd"
