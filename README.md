@@ -28,6 +28,8 @@ Built for the Casper Agentic Buildathon 2026.
 - [Reputation, and how it moves](#reputation-and-how-it-moves)
 - [What's deployed](#whats-deployed)
 - [Runs on Testnet](#runs-on-testnet)
+- [The live registry](#the-live-registry)
+- [Frontend](#frontend)
 - [Run it yourself](#run-it-yourself)
 - [Commands](#commands)
 - [Configuration](#configuration)
@@ -212,6 +214,15 @@ Every run is driven by the CLI, which opens the claim, reads the assigned id fro
 
 The sharpest moment is the "lying" claim ([claim-lying.json](orchestrator/examples/claim-lying.json)): the paperwork attests $12.5M of backing, but the reserve wallet actually holds about 2687 CSPR on-chain. A judge that trusts the paperwork passes it; the solvency judge reads the chain and FAILs it, and the claim comes back NotBacked. Full details of every run are in [DEPLOYMENTS.md](DEPLOYMENTS.md).
 
+## The live registry
+
+Beyond running one claim at a time, Tribunal keeps a standing on-chain registry of claims and their verdicts, and fills it on its own.
+
+- **A claim is a registry record.** `open_claim_with_evidence(asset, evidenceUri, evidenceHash)` stores the claim and emits a `ClaimOpened` event; `finalize` emits `ClaimFinalized`. The [Registry page](ui/app/registry/page.tsx) reads those events straight off the Casper event log, so anyone can browse every claim and what the tribunal ruled.
+- **Three ways in.** Anyone can call the contract directly, submit through the website form, or let the **feeder** ([feeder.ts](orchestrator/src/feeder.ts)) file claims automatically from configured sources.
+- **The watcher judges them on its own.** The [watcher](orchestrator/src/watcher.ts) sees a registered-but-unjudged claim, fetches its evidence, verifies the hash matches what was committed on-chain, runs the panel, and finalizes. No human in the loop.
+- **Beyond treasury.** Claims that aren't proof-of-reserves are judged against four general verification dimensions (provenance, core truth, counterparty, consistency), one per judge, written per-claim. The judges stay four distinct specialists; only the question changes. Proven on a carbon-credit claim.
+
 ## Frontend
 
 A Next.js app in [`ui/`](ui/) presents the product and runs the panel live against the deployed contract and judges. Four pages: a landing page, a "how it works" explainer, a dashboard that runs a claim and streams each judge's verdict in as it lands, and a guided demo. The reputation board reads each judge's reputation live off the contract, and the run streams real Casper and GenLayer tx links.
@@ -271,8 +282,13 @@ This opens a claim on Casper, runs all four judges (each fetching its own truth 
 | `cli.ts relay <claimId> <evidence.json>` | run the full panel on an existing claim and finalize |
 | `cli.ts relay-facet <facet> <claimId> <evidence.json>` | run one facet (authenticity \| solvency \| custodian \| valuation) |
 | `cli.ts resolve <claimId> <truthMask>` | score each judge against ground truth and move reputation (mask sets a bit per truly-passing facet id) |
+| `src/watcher.ts` | autonomous watcher: judge any registered-but-unjudged claim |
+| `src/feeder.ts` | autonomous feeder: file claims from configured sources |
 | `scripts/setup-judge-keys.mjs` | generate, fund, and register the four per-judge Casper keys (idempotent) |
+| `scripts/setup-genlayer-judges.mjs` | give each judge its own GenLayer account (for concurrent runs) |
+| `scripts/redeploy-judges.mjs` | redeploy the four GenLayer judges after a contract change |
 | `scripts/demo-resolution.mjs` | run the full resolution / reputation loop live on Testnet |
+| `scripts/build-rep-map.mjs` | rebuild the facet -> reputation-slot map after a redeploy |
 | `scripts/genlayer-keygen.mjs` | generate the GenLayer deployer key |
 | `src/proxy.ts` | local CSPR.cloud bridge (auth header + synthetic SSE stream) |
 
@@ -319,15 +335,19 @@ judges/
   facet_judge.py           one generic FacetJudge: fetches truth under consensus, then rules
   rubrics.py               the four facet rubrics (one per deployed judge)
 orchestrator/
-  src/orchestrate.ts       run the panel, submit each verdict, finalize once
+  src/orchestrate.ts       run the panel (treasury or generic), submit, finalize
   src/casper.ts            build / sign / send the Casper transactions
   src/genlayer.ts          drive the judges, with retry + read-after-write polling
   src/chainread.ts         recover the claim id and decode status from tx effects
+  src/events.ts            read the registry's claims off the Casper event log
+  src/watcher.ts           autonomous: judge any registered, unjudged claim
+  src/feeder.ts            autonomous: file claims from configured sources
   src/proxy.ts             local CSPR.cloud bridge (auth header + synthetic SSE)
   src/cli.ts               run a claim, a facet, or a resolution from the terminal
-  scripts/                 key setup + the live resolution demo
-  examples/                backed / unbacked / lying example claims
+  scripts/                 key setup, redeploys, the live resolution demo
+  examples/                backed / unbacked / lying / carbon example claims
 ui/                        Next.js frontend
+  app/registry/            the live on-chain claim registry + submit form
   app/                     landing, how-it-works, dashboard, demo + API routes
   components/              JudgePanel, VerdictCard, ReputationBoard, etc.
   lib/                     facet metadata, theme tokens, SSE client, types
