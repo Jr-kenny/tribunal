@@ -1,0 +1,79 @@
+// One-time setup: build the committed facet -> reputation-dictionary-address map.
+//
+// The Tribunal contract stores reputation in one Odra dictionary keyed by an
+// opaque per-judge slot. Odra's slot-key derivation isn't reproducible off-chain,
+// so we recover the mapping from the only tx that ties a judge's account hash to
+// its slot: register_judge (its args carry the judge account hash, its effects
+// write that judge's reputation slot). We walk the deployer's history, find the
+// four register_judge calls, and pair each judge with the dict address its
+// reputation write touched. The result is stable forever (slots don't move), so
+// the live reader can then read current values straight off these addresses.
+//
+// Run (from orchestrator/, proxy not required, uses CSPR.cloud + public RPC):
+//   npx tsx scripts/build-rep-map.mjs
+import C from "casper-js-sdk";
+import { readFileSync, writeFileSync } from "node:fs";
+import "dotenv/config";
+import { judgeAccounts } from "../src/judge-accounts.ts";
+
+const TOKEN = process.env.CSPR_CLOUD_KEY;
+if (!TOKEN) throw new Error("CSPR_CLOUD_KEY required");
+const base = "https://api.testnet.cspr.cloud";
+const rpc = new C.RpcClient(new C.HttpHandler("https://node.testnet.casper.network/rpc"));
+const deployer = C.PrivateKey.fromPem(readFileSync(process.env.CASPER_SECRET_KEY, "utf8"), C.KeyAlgorithm.ED25519);
+const pub = deployer.publicKey.toHex();
+
+const byHash = Object.fromEntries(judgeAccounts().map((a) => [a.accountHashHex.toLowerCase(), a.key]));
+
+async function cc(path) {
+  const r = await fetch(base + path, { headers: { authorization: TOKEN } });
+  if (!r.ok) throw new Error(`${path} -> ${r.status}`);
+  return r.json();
+}
+
+// collect every deploy hash across all pages
+const hashes = [];
+let page = 1;
+while (true) {
+  const j = await cc(`/accounts/${pub}/deploys?limit=10&page=${page}`);
+  const items = j.data || [];
+  for (const d of items) hashes.push(d.deploy_hash);
+  if (page >= (j.page_count || 1)) break;
+  page += 1;
+}
+console.log(`scanning ${hashes.length} deploys for register_judge...`);
+
+const map = {};
+for (const h of hashes) {
+  let detail;
+  try {
+    detail = await cc(`/deploys/${h}?fields=args,entry_point`);
+  } catch {
+    continue;
+  }
+  const d = detail.data || detail;
+  // register_judge is the only entry point whose args carry a `judge` key.
+  if (!d.args || !("judge" in d.args)) continue;
+  const judgeRaw = String(d.args?.judge?.parsed ?? "").replace(/^account-hash-/, "").toLowerCase();
+  const facet = byHash[judgeRaw];
+  if (!facet) continue;
+  const r = await rpc.getTransactionByTransactionHash(h);
+  const plain = JSON.parse(JSON.stringify(r?.executionInfo?.executionResult, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+  let repAddr = null;
+  for (const e of plain.effects ?? []) {
+    const w = e?.kind?.Write?.CLValue;
+    if (w && w.cl_type === "Any" && String(w.bytes || "").startsWith("08000000040000")) {
+      repAddr = e.key.replace(/^dictionary-/, "");
+    }
+  }
+  if (repAddr) {
+    map[facet] = repAddr;
+    console.log(`  ${facet} -> ${repAddr} (register tx ${h.slice(0, 10)})`);
+  }
+}
+
+if (Object.keys(map).length !== 4) {
+  console.warn(`WARNING: mapped ${Object.keys(map).length}/4 judges`);
+}
+writeFileSync("./judge-rep-map.json", JSON.stringify(map, null, 2) + "\n");
+console.log("wrote orchestrator/judge-rep-map.json");
