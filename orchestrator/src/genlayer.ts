@@ -31,10 +31,13 @@ function getChain(name: string) {
   }
 }
 
-function makeClient() {
-  if (!config.genlayerDeployerKeyPath) throw new Error("Missing GENLAYER_DEPLOYER_KEY path");
+// Each judge runs under its own GenLayer account so the four can fire concurrently
+// without sharing one account's nonce. Pass the judge's key path; defaults to the
+// shared deployer account for any caller that doesn't specify one.
+function makeClient(keyPath: string = config.genlayerDeployerKeyPath) {
+  if (!keyPath) throw new Error("Missing GenLayer key path");
   const chain = getChain(config.genlayerNetwork);
-  const key = readFileSync(config.genlayerDeployerKeyPath, "utf8").trim();
+  const key = readFileSync(keyPath, "utf8").trim();
   const account = createAccount(key as `0x${string}`);
   return createClient({ chain, account });
 }
@@ -90,8 +93,8 @@ async function pollRead(client: ReturnType<typeof makeClient>, params: any, trie
 }
 
 /** Run the judge on a claim and return the GenLayer tx hash (the on-chain proof). */
-export async function runJudge(judgeAddress: string, claimId: string, evidence: string): Promise<string> {
-  const client = makeClient();
+export async function runJudge(judgeAddress: string, claimId: string, evidence: string, genlayerKeyPath?: string): Promise<string> {
+  const client = makeClient(genlayerKeyPath);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "judge",
@@ -103,8 +106,8 @@ export async function runJudge(judgeAddress: string, claimId: string, evidence: 
 }
 
 /** Read the verdict the judge stored, retrying while it settles to accepted state. */
-export async function readVerdict(judgeAddress: string, claimId: string): Promise<Verdict> {
-  const client = makeClient();
+export async function readVerdict(judgeAddress: string, claimId: string, genlayerKeyPath?: string): Promise<Verdict> {
+  const client = makeClient(genlayerKeyPath);
   const raw = await pollRead(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "get_verdict",
@@ -118,8 +121,9 @@ export async function readPrice(
   judgeAddress: string,
   claimId: string,
   coingeckoId: string,
+  genlayerKeyPath?: string,
 ): Promise<bigint> {
-  const client = makeClient();
+  const client = makeClient(genlayerKeyPath);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_price",
@@ -140,8 +144,9 @@ export async function readCustodian(
   judgeAddress: string,
   claimId: string,
   entityName: string,
+  genlayerKeyPath?: string,
 ): Promise<string> {
-  const client = makeClient();
+  const client = makeClient(genlayerKeyPath);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_custodian",
@@ -162,8 +167,9 @@ export async function readAttestation(
   claimId: string,
   url: string,
   expectedSha256: string,
+  genlayerKeyPath?: string,
 ): Promise<string> {
-  const client = makeClient();
+  const client = makeClient(genlayerKeyPath);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_attestation",
@@ -184,8 +190,9 @@ export async function readReserve(
   claimId: string,
   casperNodeUrl: string,
   reservePublicKey: string,
+  genlayerKeyPath?: string,
 ): Promise<bigint> {
-  const client = makeClient();
+  const client = makeClient(genlayerKeyPath);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_reserve",

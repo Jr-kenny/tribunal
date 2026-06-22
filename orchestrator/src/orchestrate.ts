@@ -8,6 +8,7 @@
 
 import { runJudge, readVerdict, readReserve, readPrice, readCustodian, readAttestation } from "./genlayer.js";
 import { submitVerdict, finalize } from "./casper.js";
+import { confirm } from "./chainread.js";
 import { config } from "./config.js";
 
 export interface FacetSpec {
@@ -17,6 +18,9 @@ export interface FacetSpec {
   judge: string;
   // this facet's own Casper key, so its verdict accrues reputation per judge
   casperKey: string;
+  // this facet's own GenLayer account, so the four judges can run concurrently
+  // instead of sharing one account's nonce
+  genlayerKey: string;
   // each facet that verifies external/on-chain truth fetches it under consensus first:
   readsReserve?: boolean; // solvency: reserve balance off Casper
   readsPrice?: boolean; // valuation: live market price
@@ -26,11 +30,12 @@ export interface FacetSpec {
 
 // facet ids match the Tribunal contract's configured ids (see judges/rubrics.py)
 const JUDGE_KEY = (facet: string) => `../.keys/casper/judges/${facet}.pem`;
+const GL_KEY = (facet: string) => `../.keys/genlayer/judges/${facet}.key`;
 export const FACETS: FacetSpec[] = [
-  { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge, casperKey: JUDGE_KEY("authenticity"), readsAttestation: true },
-  { key: "solvency", facetId: 2, critical: true, judge: config.genlayerSolvencyJudge, casperKey: JUDGE_KEY("solvency"), readsReserve: true },
-  { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge, casperKey: JUDGE_KEY("custodian"), readsCustodian: true },
-  { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, casperKey: JUDGE_KEY("valuation"), readsPrice: true },
+  { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge, casperKey: JUDGE_KEY("authenticity"), genlayerKey: GL_KEY("authenticity"), readsAttestation: true },
+  { key: "solvency", facetId: 2, critical: true, judge: config.genlayerSolvencyJudge, casperKey: JUDGE_KEY("solvency"), genlayerKey: GL_KEY("solvency"), readsReserve: true },
+  { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge, casperKey: JUDGE_KEY("custodian"), genlayerKey: GL_KEY("custodian"), readsCustodian: true },
+  { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, casperKey: JUDGE_KEY("valuation"), genlayerKey: GL_KEY("valuation"), readsPrice: true },
 ];
 
 export interface FacetResult {
@@ -76,7 +81,7 @@ export async function judgeFacet(
     const wallet = JSON.parse(evidence).reserve_wallet as string | undefined;
     if (wallet) {
       console.log(`[${spec.key}] reading reserve wallet ${wallet} live from Casper...`);
-      const motes = await readReserve(spec.judge, String(claimId), config.casperPublicNodeUrl, wallet);
+      const motes = await readReserve(spec.judge, String(claimId), config.casperPublicNodeUrl, wallet, spec.genlayerKey);
       console.log(`[${spec.key}] verified on-chain reserve: ${motes} motes (${motes / 1_000_000_000n} CSPR)`);
       onEvent({ type: "facet-fetched", facet: spec.key, detail: `reserve read live: ${motes / 1_000_000_000n} CSPR` });
     }
@@ -86,7 +91,7 @@ export async function judgeFacet(
     // coingecko id for the priced asset; defaults to CSPR for these claims
     const symbol = (JSON.parse(evidence).price_symbol as string | undefined) ?? "casper-network";
     console.log(`[${spec.key}] reading live market price for "${symbol}" under consensus...`);
-    const micro = await readPrice(spec.judge, String(claimId), symbol);
+    const micro = await readPrice(spec.judge, String(claimId), symbol, spec.genlayerKey);
     console.log(`[${spec.key}] verified market price: $${(Number(micro) / 1_000_000).toFixed(6)} per unit`);
     onEvent({ type: "facet-fetched", facet: spec.key, detail: `market price read: $${(Number(micro) / 1_000_000).toFixed(6)}` });
   }
@@ -95,7 +100,7 @@ export async function judgeFacet(
     const name = JSON.parse(evidence).custodian as string | undefined;
     if (name) {
       console.log(`[${spec.key}] looking up custodian "${name}" under consensus...`);
-      const record = JSON.parse(await readCustodian(spec.judge, String(claimId), name));
+      const record = JSON.parse(await readCustodian(spec.judge, String(claimId), name, spec.genlayerKey));
       console.log(`[${spec.key}] custodian record: ${record.found ? `found "${record.title}"` : "NO public record"}`);
       onEvent({ type: "facet-fetched", facet: spec.key, detail: record.found ? `resolved "${record.title}"` : "no public record found" });
     }
@@ -105,15 +110,15 @@ export async function judgeFacet(
     const ev = JSON.parse(evidence);
     if (ev.document_url && ev.document_sha256) {
       console.log(`[${spec.key}] fetching + hashing attestation document under consensus...`);
-      const result = JSON.parse(await readAttestation(spec.judge, String(claimId), ev.document_url, ev.document_sha256));
+      const result = JSON.parse(await readAttestation(spec.judge, String(claimId), ev.document_url, ev.document_sha256, spec.genlayerKey));
       console.log(`[${spec.key}] document integrity: ${result.match ? "SHA-256 matches" : "SHA-256 MISMATCH"}`);
       onEvent({ type: "facet-fetched", facet: spec.key, detail: result.match ? "SHA-256 matches" : "SHA-256 mismatch" });
     }
   }
 
   console.log(`[${spec.key}] running GenLayer judge on claim ${claimId}...`);
-  const genlayerTx = await runJudge(spec.judge, String(claimId), evidence);
-  const verdict = await readVerdict(spec.judge, String(claimId));
+  const genlayerTx = await runJudge(spec.judge, String(claimId), evidence, spec.genlayerKey);
+  const verdict = await readVerdict(spec.judge, String(claimId), spec.genlayerKey);
   console.log(`[${spec.key}] ${verdict.vote} @ ${verdict.confidence}bps - ${verdict.reason}`);
   onEvent({ type: "facet-verdict", facet: spec.key, vote: verdict.vote, confidence: verdict.confidence, reason: verdict.reason, genlayerTx });
 
@@ -137,11 +142,25 @@ export async function relayPanel(claimId: number, evidence: string, onEvent: OnE
   const configured = FACETS.filter((f) => f.judge);
   if (configured.length === 0) throw new Error("No facet judges configured (set the GENLAYER_*_JUDGE env vars)");
 
-  // Sequential so the single Casper signing key submits one tx at a time.
+  // Run all judges at once. Each has its own GenLayer account and its own Casper
+  // key, so there's no shared nonce to serialize on; allSettled means one judge
+  // failing doesn't sink the others.
+  const settled = await Promise.allSettled(configured.map((spec) => judgeFacet(spec, claimId, evidence, onEvent)));
   const facets: FacetResult[] = [];
-  for (const spec of configured) {
-    facets.push(await judgeFacet(spec, claimId, evidence, onEvent));
-  }
+  settled.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      facets.push(r.value);
+    } else {
+      const spec = configured[i];
+      const message = (r.reason as Error)?.message ?? String(r.reason);
+      console.log(`[${spec.key}] failed: ${message}`);
+      onEvent({ type: "facet-error", facet: spec.key, message });
+    }
+  });
+
+  // The submits now fire concurrently, so wait until each verdict is actually
+  // on-chain before finalizing, otherwise finalize could race ahead of them.
+  await Promise.all(facets.map((f) => confirm(f.submitTx).catch(() => {})));
 
   const finalizeTx = await finalize(claimId);
   console.log(`[panel] finalized on Casper, tx ${finalizeTx}`);
@@ -154,6 +173,7 @@ export async function relayFacet(facetKey: string, claimId: number, evidence: st
   const spec = FACETS.find((f) => f.key === facetKey);
   if (!spec) throw new Error(`Unknown facet "${facetKey}" (expected one of ${FACETS.map((f) => f.key).join(", ")})`);
   const result = await judgeFacet(spec, claimId, evidence);
+  await confirm(result.submitTx).catch(() => {});
   const finalizeTx = await finalize(claimId);
   console.log(`[${facetKey}] finalized on Casper, tx ${finalizeTx}`);
   return { facets: [result], finalizeTx };
