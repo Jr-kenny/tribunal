@@ -90,6 +90,32 @@ All runs were driven by `cli.ts claim <evidence>`, which opens the claim, reads
 the assigned id from open_claim's effects, runs the panel, and decodes the final
 ClaimStatus off-chain. No claim ids or outcomes are guessed.
 
+### Resolution / reputation loop, run live (claim 13)
+
+The resolve step (scoring each judge against ground truth and moving its
+reputation per judge) was coded and unit-tested but had never run on-chain until
+now. Recorded here so it isn't mistaken for a real panel run: the four verdicts on
+claim 13 were HAND-SET to exercise the resolution path, not produced by GenLayer
+(the real panel runs are claims 5/8/10). Each verdict carried the proof string
+"demo:resolution-loop (hand-set verdict, not a GenLayer run)".
+
+Sequence (all signed by the four judges' own Casper keys; resolve signed by admin):
+- open_claim -> claim 13
+- authenticity PASS @ 9000, solvency FAIL @ 9500, custodian PASS @ 8500, valuation FAIL @ 8000
+- finalize -> NotBacked (solvency FAIL vetoed), tx `f25feb28ff4938aadc30a55d8406e9a29bbead9e9af9857be6048c4cfa5bd4bf`
+- ground truth: facets 1, 3, 4 were true and solvency (2) really failed (mask 26)
+- resolve_claim tx `1540e7758db123200ca52d88122d5a597528658fdc4492b69fdca16999a7425a`
+
+The reputation divergence was read straight off the resolve tx's effects (not the
+contract rule asserted): the four reputation writes were `[4500, 5500, 5500, 5500]`.
+Every judge started at 5000; authenticity, solvency, and custodian each called
+their facet correctly and stepped up to 5500, while valuation called it wrong
+(FAIL on a facet that was actually true) and was slashed to 4500. That closes the
+vision loop: per-judge reputation actually diverges based on who was right.
+
+Reproduce with `orchestrator/scripts/demo-resolution.mjs` (proxy up), or resolve
+any claim with `cli.ts resolve <claimId> <truthMask>`.
+
 ### History / correction
 
 An earlier record here listed a solvency judge at

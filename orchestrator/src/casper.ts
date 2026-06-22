@@ -76,3 +76,18 @@ export async function submitVerdict(
 export async function finalize(claimId: number): Promise<string> {
   return call("finalize", C.Args.fromMap({ claim_id: C.CLValue.newCLUint64(claimId) }));
 }
+
+/**
+ * Admin: resolve a claim against ground truth, scoring each judge on its own
+ * facet. `truthPassMask` is a bitmask where bit `facet_id` is set if that facet
+ * was actually true (e.g. solvency=facet 2 true -> bit 2 set). Correct calls step
+ * a judge's reputation up, wrong calls slash it. Signed by the admin (deployer)
+ * key, since resolution is admin-gated on the contract.
+ */
+export async function resolveClaim(claimId: number, truthPassMask: number): Promise<string> {
+  const args = C.Args.fromMap({
+    claim_id: C.CLValue.newCLUint64(claimId),
+    truth_pass_mask: C.CLValue.newCLUint64(truthPassMask),
+  });
+  return call("resolve_claim", args);
+}
