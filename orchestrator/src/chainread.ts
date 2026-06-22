@@ -7,8 +7,9 @@
 // writes on open_claim, and claim_status[id] is the one key whose value changes
 // between open_claim and finalize.
 
-import C from "casper-js-sdk";
+import * as CasperNS from "casper-js-sdk";
 import { config } from "./config.js";
+const C: typeof import("casper-js-sdk") = (CasperNS as any).default ?? CasperNS;
 
 const STATUS = ["Open", "Backed", "Disputed", "NotBacked"] as const;
 export type ClaimStatus = (typeof STATUS)[number];

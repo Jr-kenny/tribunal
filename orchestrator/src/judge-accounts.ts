@@ -3,7 +3,8 @@
 // is how the UI knows which on-chain identity each facet's reputation belongs to.
 
 import { readFileSync } from "node:fs";
-import C from "casper-js-sdk";
+import * as CasperNS from "casper-js-sdk";
+const C: typeof import("casper-js-sdk") = (CasperNS as any).default ?? CasperNS;
 
 const FACET_KEYS = ["authenticity", "solvency", "custodian", "valuation"] as const;
 export type JudgeFacet = (typeof FACET_KEYS)[number];

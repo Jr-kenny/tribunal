@@ -5,10 +5,11 @@
 // (Pass=0, Fail=1, Uncertain=2), confirmed from the cargo-odra contract schema.
 
 import { readFileSync } from "node:fs";
-// casper-js-sdk is CJS, so default-import the values and type-import the types
-// (named runtime imports fail under ESM).
-import C from "casper-js-sdk";
+// casper-js-sdk is CJS. tsx exposes it as a default export; the Next bundler
+// exposes it as the namespace. Take whichever is present so both work.
+import * as CasperNS from "casper-js-sdk";
 import type { PrivateKey, RpcClient, Args } from "casper-js-sdk";
+const C: typeof import("casper-js-sdk") = (CasperNS as any).default ?? CasperNS;
 import { config } from "./config.js";
 import type { Vote } from "./genlayer.js";
 
