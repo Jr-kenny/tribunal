@@ -3,6 +3,25 @@ use crate::types::*;
 use crate::federation::{federate, FacetInput};
 use crate::reputation::update_reputation;
 
+/// Emitted when a claim is opened with evidence. The registry and the autonomous
+/// watcher read these off the event log instead of decoding contract storage.
+#[odra::event]
+pub struct ClaimOpened {
+    pub claim_id: u64,
+    pub asset: String,
+    pub evidence_uri: String,
+    pub evidence_hash: String,
+    pub submitter: Address,
+}
+
+/// Emitted when a claim is federated into a final outcome.
+#[odra::event]
+pub struct ClaimFinalized {
+    pub claim_id: u64,
+    pub status: ClaimStatus,
+    pub score: Bps,
+}
+
 /// Pack (claim_id, facet_id) into one u64 key so we avoid tuple-keyed mappings.
 /// claim_id occupies the high 56 bits and facet_id the low 8, which is ample
 /// since claim ids increment from zero.
@@ -23,6 +42,8 @@ pub struct Tribunal {
     next_claim_id: Var<u64>,
     claim_status: Mapping<u64, ClaimStatus>,
     claim_score: Mapping<u64, Bps>,
+    // registry metadata for claims opened with evidence (asset + evidence pointer)
+    claim_meta: Mapping<u64, ClaimMeta>,
     // (claim_id, facet_id) packed -> verdict
     verdicts: Mapping<u64, SubmittedVerdict>,
     verdict_present: Mapping<u64, bool>,
@@ -75,6 +96,28 @@ impl Tribunal {
         id
     }
 
+    /// Open a claim as a registry record: store the asset and the evidence pointer
+    /// (a URL and the SHA-256 it must hash to) and emit a ClaimOpened event so the
+    /// registry and the watcher can pick it up off the event log. Permissionless.
+    pub fn open_claim_with_evidence(&mut self, asset: String, evidence_uri: String, evidence_hash: String) -> u64 {
+        let id = self.next_claim_id.get_or_default();
+        self.next_claim_id.set(id + 1);
+        self.claim_status.set(&id, ClaimStatus::Open);
+        self.claim_meta.set(&id, ClaimMeta {
+            asset: asset.clone(),
+            evidence_uri: evidence_uri.clone(),
+            evidence_hash: evidence_hash.clone(),
+        });
+        self.env().emit_event(ClaimOpened {
+            claim_id: id,
+            asset,
+            evidence_uri,
+            evidence_hash,
+            submitter: self.env().caller(),
+        });
+        id
+    }
+
     /// A registered judge submits its verdict for one facet of a claim.
     pub fn submit_verdict(&mut self, claim_id: u64, facet_id: u8, vote: Vote, confidence: Bps, genlayer_proof: String) {
         let judge = self.env().caller();
@@ -109,6 +152,11 @@ impl Tribunal {
         );
         self.claim_status.set(&claim_id, out.status.clone());
         self.claim_score.set(&claim_id, out.score);
+        self.env().emit_event(ClaimFinalized {
+            claim_id,
+            status: out.status.clone(),
+            score: out.score,
+        });
         out.status
     }
 
@@ -151,6 +199,10 @@ impl Tribunal {
     pub fn get_verdict(&self, claim_id: u64, facet_id: u8) -> Option<SubmittedVerdict> {
         self.verdicts.get(&vkey(claim_id, facet_id))
     }
+    /// registry metadata for a claim opened with evidence (asset + evidence pointer)
+    pub fn get_claim_meta(&self, claim_id: u64) -> Option<ClaimMeta> {
+        self.claim_meta.get(&claim_id)
+    }
 
     fn assert_admin(&self) {
         if self.env().caller() != self.admin.get().unwrap() {
@@ -168,9 +220,9 @@ pub enum Error {
 
 #[cfg(test)]
 mod tests {
-    use super::Tribunal;
+    use super::{Tribunal, ClaimOpened, ClaimFinalized};
     use crate::types::{Vote, ClaimStatus};
-    use odra::host::{Deployer, NoArgs};
+    use odra::host::{Deployer, NoArgs, HostRef};
 
     // facet ids used across the proof-of-reserves panel
     const AUTHENTICITY: u8 = 1;
@@ -257,5 +309,50 @@ mod tests {
         assert_eq!(t.get_reputation(auth), 5500); // correct PASS -> up
         assert_eq!(t.get_reputation(val), 5500);  // correct PASS -> up
         assert_eq!(t.get_reputation(cust), 4500); // wrong FAIL -> slashed
+    }
+
+    #[test]
+    fn open_with_evidence_records_and_emits() {
+        let env = odra_test::env();
+        let mut t = Tribunal::deploy(&env, NoArgs);
+
+        let id = t.open_claim_with_evidence(
+            String::from("Gold bar #7"),
+            String::from("https://example.com/ev.json"),
+            String::from("abc123"),
+        );
+
+        // stored as a self-describing registry record
+        let meta = t.get_claim_meta(id).unwrap();
+        assert_eq!(meta.asset, String::from("Gold bar #7"));
+        assert_eq!(meta.evidence_uri, String::from("https://example.com/ev.json"));
+        assert_eq!(meta.evidence_hash, String::from("abc123"));
+
+        // and emitted on the event log for the registry/watcher to read
+        let ev: ClaimOpened = t.get_event(0).unwrap();
+        assert_eq!(ev.claim_id, id);
+        assert_eq!(ev.asset, String::from("Gold bar #7"));
+        assert_eq!(ev.evidence_uri, String::from("https://example.com/ev.json"));
+    }
+
+    #[test]
+    fn finalize_emits_claim_finalized() {
+        let env = odra_test::env();
+        let mut t = Tribunal::deploy(&env, NoArgs);
+        let solv = env.get_account(2);
+
+        t.configure_facet(SOLVENCY, 1, true);
+        t.register_judge(solv);
+
+        let claim = t.open_claim_with_evidence(String::from("X"), String::from("u"), String::from("h")); // event 0
+        env.set_caller(solv);
+        t.submit_verdict(claim, SOLVENCY, Vote::Fail, 9000, String::from("gl"));
+        env.set_caller(env.get_account(0));
+        let status = t.finalize(claim); // event 1
+        assert_eq!(status, ClaimStatus::NotBacked);
+
+        let ev: ClaimFinalized = t.get_event(1).unwrap();
+        assert_eq!(ev.claim_id, claim);
+        assert_eq!(ev.status, ClaimStatus::NotBacked);
     }
 }

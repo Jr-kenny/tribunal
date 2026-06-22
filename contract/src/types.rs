@@ -31,6 +31,16 @@ pub struct FacetConfig {
     pub critical: bool,
 }
 
+/// Registry metadata for a claim: what asset it's about and where its evidence
+/// lives (a URL plus the SHA-256 the evidence must hash to). Set when a claim is
+/// opened with evidence, so the claim is a self-describing registry record.
+#[odra::odra_type]
+pub struct ClaimMeta {
+    pub asset: String,
+    pub evidence_uri: String,
+    pub evidence_hash: String,
+}
+
 /// A verdict a judge submitted on-chain for one facet of one claim.
 #[odra::odra_type]
 pub struct SubmittedVerdict {
