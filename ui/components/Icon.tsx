@@ -19,6 +19,7 @@ import {
   Search,
   ShieldAlert,
   RefreshCw,
+  Plus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,6 +44,7 @@ const MAP: Record<string, LucideIcon> = {
   search: Search,
   "shield-alert": ShieldAlert,
   refresh: RefreshCw,
+  plus: Plus,
 };
 
 export function Icon({

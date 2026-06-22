@@ -46,7 +46,12 @@ export default function RegistryPage() {
   const [claims, setClaims] = useState<ClaimRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [asset, setAsset] = useState("");
+  const [evidenceUrl, setEvidenceUrl] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function loadClaims() {
     fetch("/api/registry", { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
@@ -54,7 +59,34 @@ export default function RegistryPage() {
         setClaims(j.claims);
       })
       .catch((e) => setError((e as Error).message));
+  }
+
+  useEffect(() => {
+    loadClaims();
   }, []);
+
+  async function submit() {
+    if (!asset.trim() || !evidenceUrl.trim()) return;
+    setSubmitting(true);
+    setSubmitMsg(null);
+    try {
+      const r = await fetch("/api/registry/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset: asset.trim(), evidenceUrl: evidenceUrl.trim() }),
+      });
+      const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      setSubmitMsg({ ok: true, text: `Registered as claim #${j.claimId}. The watcher will judge it shortly.` });
+      setAsset("");
+      setEvidenceUrl("");
+      setTimeout(loadClaims, 1500);
+    } catch (e) {
+      setSubmitMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <main>
@@ -63,6 +95,36 @@ export default function RegistryPage() {
           A standing on-chain record of the real-world-asset claims submitted to Tribunal and the
           panel&apos;s verdict on each, read live from the Casper event log.
         </p>
+
+        <div className="card" style={{ padding: 18, marginBottom: 24 }}>
+          <p style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>Submit a claim to the registry</p>
+          <p className="faint" style={{ fontSize: 12.5, marginBottom: 14 }}>
+            Give an asset name and a public URL serving the evidence JSON. It&apos;s registered on Casper and
+            the panel judges it automatically.
+          </p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input
+              value={asset}
+              onChange={(e) => setAsset(e.target.value)}
+              placeholder="Asset name"
+              disabled={submitting}
+              style={{ flex: "1 1 200px", background: "var(--bg-1)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "10px 12px", fontSize: 14 }}
+            />
+            <input
+              value={evidenceUrl}
+              onChange={(e) => setEvidenceUrl(e.target.value)}
+              placeholder="https://… evidence JSON URL"
+              disabled={submitting}
+              style={{ flex: "2 1 280px", background: "var(--bg-1)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--font-mono)" }}
+            />
+            <button className="btn btn-primary" onClick={submit} disabled={submitting}>
+              {submitting ? <><Icon name="loader" size={15} color="#fff" className="spin" /> Registering…</> : <><Icon name="plus" size={15} color="#fff" /> Register</>}
+            </button>
+          </div>
+          {submitMsg && (
+            <p style={{ fontSize: 13, marginTop: 12, color: submitMsg.ok ? "var(--pass)" : "var(--fail)" }}>{submitMsg.text}</p>
+          )}
+        </div>
 
         {error && (
           <div className="card" style={{ padding: 18, borderColor: "var(--fail)" }}>
