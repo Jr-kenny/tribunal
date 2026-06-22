@@ -9,6 +9,17 @@ const VOTE_STYLE: Record<Vote, { bg: string; fg: string; label: string }> = {
   UNCERTAIN: { bg: "var(--uncertain-bg)", fg: "var(--uncertain)", label: "UNCERTAIN" },
 };
 
+// A human answer to each facet's own question, so the card replies like a person
+// ("No, it's not genuine") instead of a robotic label ("FAIL").
+const ANSWERS: Record<string, Record<Vote, string>> = {
+  authenticity: { PASS: "Yes, it looks genuine", FAIL: "No, it's not genuine", UNCERTAIN: "Can't really tell" },
+  solvency: { PASS: "Yes, the money's there", FAIL: "No, the money isn't there", UNCERTAIN: "Can't really tell" },
+  custodian: { PASS: "Yes, they're legit", FAIL: "No, they don't check out", UNCERTAIN: "Can't really tell" },
+  valuation: { PASS: "Yes, it holds up", FAIL: "No, it doesn't hold up", UNCERTAIN: "Can't really tell" },
+};
+const GENERIC_ANSWER: Record<Vote, string> = { PASS: "Yes", FAIL: "No", UNCERTAIN: "Can't really tell" };
+const humanAnswer = (facetKey: string, vote: Vote) => (ANSWERS[facetKey] ?? GENERIC_ANSWER)[vote];
+
 function StatusLine({ view }: { view: JudgeView }) {
   if (view.status === "idle") return <span className="faint" style={{ fontSize: 12 }}>waiting…</span>;
   if (view.status === "fetching")
@@ -67,9 +78,12 @@ export function JudgeCard({ facet, view }: { facet: Facet; view: JudgeView }) {
 
       <p className="faint" style={{ fontSize: 12.5, marginBottom: 10 }}>{facet.question}</p>
 
-      {decided ? (
+      {decided && view.vote ? (
         <div>
-          <p className="dim" style={{ fontSize: 12.5, marginBottom: 8, lineHeight: 1.5 }}>
+          <p style={{ fontSize: 16, fontWeight: 600, color: vs?.fg, margin: "0 0 6px" }}>
+            {humanAnswer(facet.key, view.vote)}
+          </p>
+          <p className="dim" style={{ fontSize: 12.5, marginBottom: 8, lineHeight: 1.55 }}>
             {view.confidence != null && (
               <span style={{ color: "var(--text)" }}>{(view.confidence / 100).toFixed(0)}% confident</span>
             )}
