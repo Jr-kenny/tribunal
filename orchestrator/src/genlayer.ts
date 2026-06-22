@@ -137,6 +137,27 @@ export async function readVerdict(judgeAddress: string, claimId: string, genlaye
   return JSON.parse(raw as string) as Verdict;
 }
 
+/** Read a judge's stored verdict if present, without long-polling. Returns null
+ * when the judge hasn't ruled on this claim yet (used by the registry detail view). */
+export async function readVerdictMaybe(
+  judgeAddress: string,
+  claimId: string,
+  genlayerKeyPath?: string,
+): Promise<Verdict | null> {
+  const client = makeClient(genlayerKeyPath);
+  try {
+    const raw = await rpcRead(client, {
+      address: judgeAddress as `0x${string}`,
+      functionName: "get_verdict",
+      args: [claimId],
+    });
+    return raw ? (JSON.parse(raw as string) as Verdict) : null;
+  } catch {
+    // "no verdict for claim" (not ruled yet) or a read blip: treat as unavailable
+    return null;
+  }
+}
+
 /** Make the judge fetch a live USD market price under consensus, returning micro-USD. */
 export async function readPrice(
   judgeAddress: string,

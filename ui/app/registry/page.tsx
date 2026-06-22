@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Section } from "@/components/Section";
 import { Icon } from "@/components/Icon";
 
@@ -134,50 +135,37 @@ export default function RegistryPage() {
 
         {!error && !claims && <p className="faint" style={{ fontSize: 14 }}>reading the chain…</p>}
 
-        {claims && claims.length === 0 && (
-          <p className="faint" style={{ fontSize: 14 }}>No claims registered yet.</p>
-        )}
-
-        {claims && claims.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {claims.map((c) => (
-              <div
-                key={c.claimId}
-                className="card"
-                style={{ padding: "16px 20px", borderLeft: `2px solid ${STATUS[c.status].color}` }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                      <span style={{ fontWeight: 600, fontSize: 16 }}>
-                        {c.asset ?? `Untitled claim #${c.claimId}`}
-                      </span>
+        {(() => {
+          if (!claims) return null;
+          const shown = claims.filter((c) => c.asset); // only real submitted claims, not internal test ones
+          if (shown.length === 0) return <p className="faint" style={{ fontSize: 14 }}>No claims registered yet.</p>;
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {shown.map((c) => (
+                <Link
+                  key={c.claimId}
+                  href={`/registry/${c.claimId}`}
+                  className="card"
+                  style={{ padding: "16px 20px", borderLeft: `2px solid ${STATUS[c.status].color}`, display: "block" }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontWeight: 600, fontSize: 16 }}>{c.asset}</span>
                       <span className="faint" style={{ fontSize: 12 }}>#{c.claimId}</span>
                     </div>
-                    {c.evidenceUri && (
-                      <a
-                        href={c.evidenceUri}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "var(--accent)" }}
-                      >
-                        evidence <Icon name="external-link" size={12} color="var(--accent)" />
-                      </a>
-                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                      {c.score != null && c.status !== "Open" && (
+                        <span className="mono" style={{ fontSize: 13, color: "var(--text-dim)" }}>{(c.score / 100).toFixed(0)}%</span>
+                      )}
+                      <StatusBadge status={c.status} />
+                      <Icon name="arrow-right" size={15} color="var(--text-dim)" />
+                    </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                    {c.score != null && c.status !== "Open" && (
-                      <span className="mono" style={{ fontSize: 13, color: "var(--text-dim)" }}>
-                        {(c.score / 100).toFixed(0)}%
-                      </span>
-                    )}
-                    <StatusBadge status={c.status} />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+                </Link>
+              ))}
+            </div>
+          );
+        })()}
       </Section>
     </main>
   );
