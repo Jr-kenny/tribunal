@@ -326,4 +326,4 @@ The reputation and federation engine on Casper is fully claim-agnostic. What's w
 
 ## License
 
-All code and content is original, built for the Casper Agentic Buildathon 2026. A `LICENSE` file accompanies the submission.
+All code and content is original, built for the Casper Agentic Buildathon 2026. Released under the MIT License, see [LICENSE](LICENSE).
