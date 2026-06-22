@@ -1,6 +1,7 @@
 "use client";
 
 import { Icon } from "./Icon";
+import { REPLAYS } from "@/lib/replays";
 
 export const EXAMPLE_CLAIMS = [
   { key: "claim-lying", label: "Lying claim — attests $12.5M, wallet holds ~2687 CSPR" },
@@ -42,6 +43,7 @@ export function ClaimForm({
   running: boolean;
 }) {
   const custom = claimKey === "custom";
+  const isReplay = claimKey.startsWith("replay:");
   return (
     <div className="card" style={{ padding: 14 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -60,11 +62,20 @@ export function ClaimForm({
             fontSize: 14,
           }}
         >
-          {EXAMPLE_CLAIMS.map((c) => (
-            <option key={c.key} value={c.key}>
-              {c.label}
-            </option>
-          ))}
+          <optgroup label="Run live (real, slow)">
+            {EXAMPLE_CLAIMS.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Replay a real past run (instant)">
+            {REPLAYS.map((r) => (
+              <option key={r.key} value={r.key}>
+                {r.label}
+              </option>
+            ))}
+          </optgroup>
         </select>
         <button className="btn btn-primary" onClick={onRun} disabled={running} style={{ opacity: running ? 0.7 : 1 }}>
           {running ? (
@@ -73,7 +84,7 @@ export function ClaimForm({
             </>
           ) : (
             <>
-              <Icon name="play" size={16} color="#fff" /> Run panel
+              <Icon name="play" size={16} color="#fff" /> {isReplay ? "Replay run" : "Run panel"}
             </>
           )}
         </button>

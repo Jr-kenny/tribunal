@@ -6,7 +6,9 @@ import { JudgePanel } from "@/components/JudgePanel";
 import { VerdictCard } from "@/components/VerdictCard";
 import { ReputationBoard } from "@/components/ReputationBoard";
 import { TxLink } from "@/components/TxLink";
+import { Icon } from "@/components/Icon";
 import { runClaim } from "@/lib/sse";
+import { playReplay, replayByKey } from "@/lib/replays";
 import type { ClaimStatus, JudgeView, StreamEvent } from "@/lib/types";
 
 const FRESH: Record<string, JudgeView> = {
@@ -37,11 +39,72 @@ export default function DashboardPage() {
   const [repKey, setRepKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  const isReplay = claimKey.startsWith("replay:");
+
   const patch = (facet: string, p: Partial<JudgeView>) =>
     setViews((v) => ({ ...v, [facet]: { ...v[facet], ...p } }));
 
+  function handleEvent(e: StreamEvent) {
+    switch (e.type) {
+      case "claim-opened":
+        setClaimId(e.claimId);
+        setOpenTx(e.tx);
+        break;
+      case "facet-started":
+        patch(e.facet, { status: "fetching", detail: "fetching evidence…" });
+        break;
+      case "facet-fetched":
+        patch(e.facet, { status: "fetching", detail: e.detail });
+        break;
+      case "facet-verdict":
+        patch(e.facet, { status: "verdict", vote: e.vote, confidence: e.confidence, reason: e.reason, genlayerTx: e.genlayerTx });
+        break;
+      case "facet-submitted":
+        patch(e.facet, { status: "submitted", submitTx: e.submitTx });
+        break;
+      case "facet-error":
+        patch(e.facet, { status: "error", error: e.message });
+        break;
+      case "finalized":
+        if (e.status) setStatus(e.status);
+        setFinalizeTx(e.finalizeTx);
+        setRepKey((k) => k + 1);
+        break;
+      case "done":
+        setRunning(false);
+        setRepKey((k) => k + 1);
+        break;
+      case "error":
+        setError(e.message);
+        setRunning(false);
+        break;
+    }
+  }
+
+  function resetRun() {
+    setViews(FRESH);
+    setStatus(null);
+    setFinalizeTx(undefined);
+    setClaimId(null);
+    setOpenTx(null);
+    setError(null);
+  }
+
   async function onRun() {
-    // a custom claim ships raw evidence; validate it's JSON before opening anything on-chain
+    setError(null);
+
+    // Replay: play a real past on-chain run locally, at a watchable speed.
+    if (isReplay) {
+      const replay = replayByKey(claimKey);
+      if (!replay) return;
+      setRunning(true);
+      resetRun();
+      await playReplay(replay, handleEvent);
+      setRunning(false);
+      return;
+    }
+
+    // Live: a custom claim ships raw evidence; validate it's JSON first.
     let body: { claimKey?: string; evidence?: string };
     if (claimKey === "custom") {
       try {
@@ -56,55 +119,8 @@ export default function DashboardPage() {
     }
 
     setRunning(true);
-    setViews(FRESH);
-    setStatus(null);
-    setFinalizeTx(undefined);
-    setClaimId(null);
-    setOpenTx(null);
-    setError(null);
-
-    await runClaim(body, (e: StreamEvent) => {
-      switch (e.type) {
-        case "claim-opened":
-          setClaimId(e.claimId);
-          setOpenTx(e.tx);
-          break;
-        case "facet-started":
-          patch(e.facet, { status: "fetching", detail: "fetching evidence…" });
-          break;
-        case "facet-fetched":
-          patch(e.facet, { status: "fetching", detail: e.detail });
-          break;
-        case "facet-verdict":
-          patch(e.facet, {
-            status: "verdict",
-            vote: e.vote,
-            confidence: e.confidence,
-            reason: e.reason,
-            genlayerTx: e.genlayerTx,
-          });
-          break;
-        case "facet-submitted":
-          patch(e.facet, { status: "submitted", submitTx: e.submitTx });
-          break;
-        case "facet-error":
-          patch(e.facet, { status: "error", error: e.message });
-          break;
-        case "finalized":
-          if (e.status) setStatus(e.status);
-          setFinalizeTx(e.finalizeTx);
-          setRepKey((k) => k + 1);
-          break;
-        case "done":
-          setRunning(false);
-          setRepKey((k) => k + 1);
-          break;
-        case "error":
-          setError(e.message);
-          setRunning(false);
-          break;
-      }
-    });
+    resetRun();
+    await runClaim(body, handleEvent);
     setRunning(false);
   }
 
@@ -128,9 +144,16 @@ export default function DashboardPage() {
         running={running}
       />
 
+      {isReplay && (
+        <p className="dim" style={{ fontSize: 12.5, margin: "10px 2px 0", display: "flex", alignItems: "center", gap: 7 }}>
+          <Icon name="refresh" size={13} color="var(--accent)" />
+          Replay of a real run that already happened on Casper. The verdict and finalize tx below are real and link to the explorer.
+        </p>
+      )}
+
       {(claimId != null || openTx) && (
         <p className="dim" style={{ fontSize: 13, margin: "12px 2px 0" }}>
-          {claimId != null ? `Claim ${claimId} opened on Casper` : "Opening claim…"}{" "}
+          {claimId != null ? `Claim ${claimId}${isReplay ? "" : " opened on Casper"}` : "Opening claim…"}{" "}
           {openTx && <TxLink hash={openTx} kind="casper" />}
         </p>
       )}
