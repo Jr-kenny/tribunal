@@ -212,6 +212,26 @@ Every run is driven by the CLI, which opens the claim, reads the assigned id fro
 
 The sharpest moment is the "lying" claim ([claim-lying.json](orchestrator/examples/claim-lying.json)): the paperwork attests $12.5M of backing, but the reserve wallet actually holds about 2687 CSPR on-chain. A judge that trusts the paperwork passes it; the solvency judge reads the chain and FAILs it, and the claim comes back NotBacked. Full details of every run are in [DEPLOYMENTS.md](DEPLOYMENTS.md).
 
+## Frontend
+
+A Next.js app in [`ui/`](ui/) presents the product and runs the panel live against the deployed contract and judges. Four pages: a landing page, a "how it works" explainer, a dashboard that runs a claim and streams each judge's verdict in as it lands, and a guided demo. The reputation board reads each judge's reputation live off the contract, and the run streams real Casper and GenLayer tx links.
+
+![Landing](docs/screenshots/landing.png)
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+The reputation board above is reading the real on-chain values from claim 13's resolution (5500 / 5500 / 5500 / 4500). See [docs/screenshots](docs/screenshots) for the how-it-works and demo pages too.
+
+To run it (needs the CSPR.cloud bridge from the Orchestrator section running in another terminal, and a `ui/.env` with the same values as `orchestrator/.env`):
+
+```bash
+cd ui
+npm install
+npm run dev      # http://localhost:3000
+```
+
+A live full-panel run drives GenLayer's studionet, which can be slow and occasionally throws transient RPC errors; the relay retries, and the dashboard streams progress so it stays responsive. The reputation board and the on-chain reads work instantly regardless.
+
 ## Run it yourself
 
 ### Contract
@@ -307,7 +327,11 @@ orchestrator/
   src/cli.ts               run a claim, a facet, or a resolution from the terminal
   scripts/                 key setup + the live resolution demo
   examples/                backed / unbacked / lying example claims
-docs/                      the design spec and implementation plan
+ui/                        Next.js frontend
+  app/                     landing, how-it-works, dashboard, demo + API routes
+  components/              JudgePanel, VerdictCard, ReputationBoard, etc.
+  lib/                     facet metadata, theme tokens, SSE client, types
+docs/                      the design spec, implementation plan, screenshots
 DEPLOYMENTS.md             every on-chain run, with tx hashes
 ```
 
