@@ -1,0 +1,26 @@
+name: keep-render-awake
+
+# Render free web services spin down after ~15 min idle and cold-start on the
+# next request. This pings the health endpoint so the orchestrator stays warm,
+# so a "run a claim" doesn't sit through a 30-60s wake. GitHub's scheduler can
+# run late, so the interval is tighter than 15 min and the step retries to ride
+# out a cold start if it did sleep.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          URL="https://tribunal-orchestrator.onrender.com/health"
+          for i in 1 2 3 4; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$URL") || code=000
+            echo "attempt $i -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 20
+          done
+          echo "did not get 200, but the requests will have woken the service"
