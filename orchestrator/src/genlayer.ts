@@ -31,12 +31,25 @@ function getChain(name: string) {
   }
 }
 
+// An ephemeral account for read-only view calls (get_verdict and friends). Reads
+// don't sign anything, so when the real signing keys aren't present (the Vercel
+// UI only reads), we still need *some* account to build the client. Writes run
+// where the keys are set (Render), so they never hit this fallback.
+const READ_ONLY_KEY = `0x${"1".repeat(64)}` as const;
+
 // Each judge runs under its own GenLayer account so the four can fire concurrently
 // without sharing one account's nonce. keyId is a facet ("authenticity"…) or
-// "deployer"; resolved from env (cloud) or the local key file.
+// "deployer"; resolved from env (cloud) or the local key file. Falls back to an
+// ephemeral account when no key is configured, so reads work without the keys.
 function makeClient(keyId: string = "deployer") {
   const chain = getChain(config.genlayerNetwork);
-  const account = createAccount(genlayerKeyValue(keyId) as `0x${string}`);
+  let key: string;
+  try {
+    key = genlayerKeyValue(keyId);
+  } catch {
+    key = READ_ONLY_KEY;
+  }
+  const account = createAccount(key as `0x${string}`);
   return createClient({ chain, account });
 }
 
