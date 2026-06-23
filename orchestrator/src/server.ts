@@ -19,11 +19,13 @@ import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import "dotenv/config";
+import { config } from "./config.js";
 import { startProxy } from "./proxy.js";
 import { startWatcher } from "./watcher.js";
 import { startFeeder } from "./feeder.js";
 import { openClaim, openClaimWithEvidence } from "./casper.js";
 import { relayPanel } from "./orchestrate.js";
+import { scoutGetDiscovery } from "./genlayer.js";
 import { confirm, claimIdFromOpen, statusFromDiff } from "./chainread.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -148,6 +150,22 @@ async function handleSubmit(req: http.IncomingMessage, res: http.ServerResponse)
   }
 }
 
+// GET /scout/evidence/<key> -> the framed evidence for a scout discovery, read
+// straight off the scout's on-chain record. The feeder commits this URL + its
+// hash as a claim's evidence, so the watcher fetches and verifies it here.
+async function handleScoutEvidence(req: http.IncomingMessage, res: http.ServerResponse, key: string): Promise<void> {
+  if (!config.genlayerScout) return json(req, res, 503, { error: "scout not configured" });
+  try {
+    const d = await scoutGetDiscovery(config.genlayerScout, key);
+    if (!d) return json(req, res, 404, { error: "no such discovery" });
+    // return the exact stored string so its sha256 matches what the feeder committed
+    res.writeHead(200, corsHeaders(req, { "Content-Type": "application/json" }));
+    res.end(d.evidence);
+  } catch (e) {
+    return json(req, res, 502, { error: (e as Error).message ?? "scout read failed" });
+  }
+}
+
 // The bridge runs here so Casper writes get their CSPR.cloud header on localhost.
 startProxy();
 
@@ -170,6 +188,10 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
   if (req.method === "GET" && url.startsWith("/health")) return json(req, res, 200, { ok: true });
+  if (req.method === "GET" && url.startsWith("/scout/evidence/")) {
+    const key = decodeURIComponent(url.slice("/scout/evidence/".length).split("?")[0]);
+    return void handleScoutEvidence(req, res, key);
+  }
   if (req.method === "POST" && url.startsWith("/claim/run")) return void handleRun(req, res);
   if (req.method === "POST" && url.startsWith("/claim/submit")) return void handleSubmit(req, res);
   return json(req, res, 404, { error: "not found" });

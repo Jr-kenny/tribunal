@@ -260,3 +260,58 @@ export async function readReserve(
   });
   return BigInt(raw as string);
 }
+
+export interface ScoutDiscovery {
+  key: string;
+  asset: string;
+  evidence: string; // the framed claim JSON the panel will judge
+  source: string;
+}
+
+/** Make the Scout contract scrape one live RWA source under consensus, storing any
+ * newly discovered backing claims. A write, signed by the deployer account. */
+export async function scoutScan(
+  scoutAddress: string,
+  sourceUrl: string,
+  sourceKind: string,
+  maxItems: number,
+  keyId?: string,
+): Promise<string> {
+  const client = makeClient(keyId);
+  const txHash = await rpcWrite(client, {
+    address: scoutAddress as `0x${string}`,
+    functionName: "scan",
+    args: [sourceUrl, sourceKind, maxItems],
+    value: 0n,
+  });
+  await rpcWait(client, { hash: txHash, ...ACCEPTED });
+  return txHash as string;
+}
+
+/** Read everything the Scout has discovered so far. */
+export async function scoutListDiscoveries(scoutAddress: string, keyId?: string): Promise<ScoutDiscovery[]> {
+  const client = makeClient(keyId);
+  const raw = await rpcRead(client, {
+    address: scoutAddress as `0x${string}`,
+    functionName: "list_discoveries",
+    args: [],
+  });
+  return JSON.parse((raw as string) || "[]") as ScoutDiscovery[];
+}
+
+/** Read one discovery's stored record (used by the /scout/evidence route). */
+export async function scoutGetDiscovery(scoutAddress: string, key: string, keyId?: string): Promise<ScoutDiscovery | null> {
+  const client = makeClient(keyId);
+  try {
+    const raw = await rpcRead(client, {
+      address: scoutAddress as `0x${string}`,
+      functionName: "get_discovery",
+      args: [key],
+    });
+    if (!raw) return null;
+    const rec = JSON.parse(raw as string);
+    return { key, asset: rec.asset, evidence: rec.evidence, source: rec.source };
+  } catch {
+    return null;
+  }
+}

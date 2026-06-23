@@ -21,6 +21,11 @@ export const config = {
   genlayerSolvencyJudge: process.env.GENLAYER_SOLVENCY_JUDGE ?? "",
   genlayerCustodianJudge: process.env.GENLAYER_CUSTODIAN_JUDGE ?? "",
   genlayerValuationJudge: process.env.GENLAYER_VALUATION_JUDGE ?? "",
+  // the Scout discovery contract (scrapes live RWA sources under consensus)
+  genlayerScout: process.env.GENLAYER_SCOUT ?? "",
+  // public base the feeder commits as each discovered claim's evidence URL; the
+  // /scout/evidence/<key> route serves the scout's stored framing for the watcher
+  scoutEvidenceBase: process.env.SCOUT_EVIDENCE_BASE ?? "https://tribunal-orchestrator.onrender.com",
 } as const;
 
 export function requireEnv(name: keyof typeof config): string {

@@ -1,0 +1,12 @@
+[
+  {
+    "url": "https://news.google.com/rss/search?q=%22real-world+asset%22+tokenized+OR+%22proof+of+reserves%22+backed&hl=en-US&gl=US&ceid=US:en",
+    "kind": "rwa-news",
+    "maxItems": 3
+  },
+  {
+    "url": "https://stablecoins.llama.fi/stablecoins?includePrices=true",
+    "kind": "proof-of-reserves",
+    "maxItems": 3
+  }
+]
