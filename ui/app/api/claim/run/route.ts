@@ -6,7 +6,10 @@ import { confirm, claimIdFromOpen, statusFromDiff } from "../../../../../orchest
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 800; // a live panel run can take minutes
+// In production the dashboard streams from the Render service (panel runs take
+// minutes, past Vercel's function cap). This same-origin route stays for local
+// dev, where next dev ignores maxDuration; keep it within the Hobby 60s ceiling.
+export const maxDuration = 60;
 
 const EXAMPLES: Record<string, string> = {
   "claim-backed": "claim-backed.json",

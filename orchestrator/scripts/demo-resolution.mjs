@@ -15,7 +15,6 @@
 import { openClaim, submitVerdict, finalize, resolveClaim } from "../src/casper.ts";
 import { confirm, claimIdFromOpen, statusFromDiff } from "../src/chainread.ts";
 
-const J = (f) => `../.keys/casper/judges/${f}.pem`;
 const PROOF = "demo:resolution-loop (hand-set verdict, not a GenLayer run)";
 
 // facet ids: authenticity=1, solvency=2, custodian=3, valuation=4
@@ -37,7 +36,7 @@ const claimId = claimIdFromOpen(openInfo);
 console.log(`claim ${claimId} opened (tx ${openTx})\n`);
 
 for (const v of verdicts) {
-  const tx = await submitVerdict(claimId, v.id, v.vote, v.conf, PROOF, J(v.facet));
+  const tx = await submitVerdict(claimId, v.id, v.vote, v.conf, PROOF, v.facet);
   await confirm(tx);
   console.log(`[${v.facet}] ${v.vote} @ ${v.conf}bps submitted under its own judge key (tx ${tx})`);
 }

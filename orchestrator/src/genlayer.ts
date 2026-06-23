@@ -3,11 +3,11 @@
 // Casper). The flow is write the judge call, wait for ACCEPTED, then read back
 // the verdict the judge committed to state.
 
-import { readFileSync } from "node:fs";
 import { createAccount, createClient } from "genlayer-js";
 import { localnet, studionet, testnetAsimov, testnetBradbury } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
 import { config } from "./config.js";
+import { genlayerKeyValue } from "./keys.js";
 
 export type Vote = "PASS" | "FAIL" | "UNCERTAIN";
 export interface Verdict {
@@ -32,13 +32,11 @@ function getChain(name: string) {
 }
 
 // Each judge runs under its own GenLayer account so the four can fire concurrently
-// without sharing one account's nonce. Pass the judge's key path; defaults to the
-// shared deployer account for any caller that doesn't specify one.
-function makeClient(keyPath: string = config.genlayerDeployerKeyPath) {
-  if (!keyPath) throw new Error("Missing GenLayer key path");
+// without sharing one account's nonce. keyId is a facet ("authenticity"…) or
+// "deployer"; resolved from env (cloud) or the local key file.
+function makeClient(keyId: string = "deployer") {
   const chain = getChain(config.genlayerNetwork);
-  const key = readFileSync(keyPath, "utf8").trim();
-  const account = createAccount(key as `0x${string}`);
+  const account = createAccount(genlayerKeyValue(keyId) as `0x${string}`);
   return createClient({ chain, account });
 }
 
@@ -93,8 +91,8 @@ async function pollRead(client: ReturnType<typeof makeClient>, params: any, trie
 }
 
 /** Run the judge on a claim and return the GenLayer tx hash (the on-chain proof). */
-export async function runJudge(judgeAddress: string, claimId: string, evidence: string, genlayerKeyPath?: string): Promise<string> {
-  const client = makeClient(genlayerKeyPath);
+export async function runJudge(judgeAddress: string, claimId: string, evidence: string, keyId?: string): Promise<string> {
+  const client = makeClient(keyId);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "judge",
@@ -113,9 +111,9 @@ export async function runJudgeWithRubric(
   evidence: string,
   facetName: string,
   rubric: string,
-  genlayerKeyPath?: string,
+  keyId?: string,
 ): Promise<string> {
-  const client = makeClient(genlayerKeyPath);
+  const client = makeClient(keyId);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "judge_with_rubric",
@@ -127,8 +125,8 @@ export async function runJudgeWithRubric(
 }
 
 /** Read the verdict the judge stored, retrying while it settles to accepted state. */
-export async function readVerdict(judgeAddress: string, claimId: string, genlayerKeyPath?: string): Promise<Verdict> {
-  const client = makeClient(genlayerKeyPath);
+export async function readVerdict(judgeAddress: string, claimId: string, keyId?: string): Promise<Verdict> {
+  const client = makeClient(keyId);
   const raw = await pollRead(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "get_verdict",
@@ -142,9 +140,9 @@ export async function readVerdict(judgeAddress: string, claimId: string, genlaye
 export async function readVerdictMaybe(
   judgeAddress: string,
   claimId: string,
-  genlayerKeyPath?: string,
+  keyId?: string,
 ): Promise<Verdict | null> {
-  const client = makeClient(genlayerKeyPath);
+  const client = makeClient(keyId);
   try {
     const raw = await rpcRead(client, {
       address: judgeAddress as `0x${string}`,
@@ -163,9 +161,9 @@ export async function readPrice(
   judgeAddress: string,
   claimId: string,
   coingeckoId: string,
-  genlayerKeyPath?: string,
+  keyId?: string,
 ): Promise<bigint> {
-  const client = makeClient(genlayerKeyPath);
+  const client = makeClient(keyId);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_price",
@@ -186,9 +184,9 @@ export async function readCustodian(
   judgeAddress: string,
   claimId: string,
   entityName: string,
-  genlayerKeyPath?: string,
+  keyId?: string,
 ): Promise<string> {
-  const client = makeClient(genlayerKeyPath);
+  const client = makeClient(keyId);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_custodian",
@@ -209,9 +207,9 @@ export async function readAttestation(
   claimId: string,
   url: string,
   expectedSha256: string,
-  genlayerKeyPath?: string,
+  keyId?: string,
 ): Promise<string> {
-  const client = makeClient(genlayerKeyPath);
+  const client = makeClient(keyId);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_attestation",
@@ -232,9 +230,9 @@ export async function readReserve(
   claimId: string,
   casperNodeUrl: string,
   reservePublicKey: string,
-  genlayerKeyPath?: string,
+  keyId?: string,
 ): Promise<bigint> {
-  const client = makeClient(genlayerKeyPath);
+  const client = makeClient(keyId);
   const txHash = await rpcWrite(client, {
     address: judgeAddress as `0x${string}`,
     functionName: "read_reserve",

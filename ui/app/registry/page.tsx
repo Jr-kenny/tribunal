@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Section } from "@/components/Section";
 import { Icon } from "@/components/Icon";
+import { submitUrl } from "@/lib/endpoints";
 
 type ClaimStatus = "Open" | "Backed" | "Disputed" | "NotBacked";
 
@@ -71,7 +72,7 @@ export default function RegistryPage() {
     setSubmitting(true);
     setSubmitMsg(null);
     try {
-      const r = await fetch("/api/registry/submit", {
+      const r = await fetch(submitUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ asset: asset.trim(), evidenceUrl: evidenceUrl.trim() }),

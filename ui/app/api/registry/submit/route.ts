@@ -5,7 +5,7 @@ import { confirm, claimIdFromOpen } from "../../../../../orchestrator/src/chainr
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 60; // Hobby cap; production submits via the Render service
 
 // POST /api/registry/submit { asset, evidenceUrl }
 // Fetches the evidence URL, hashes it, and registers the claim on-chain. The

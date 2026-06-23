@@ -1,11 +1,12 @@
 import type { StreamEvent } from "./types";
+import { runUrl } from "./endpoints";
 
 // POST a claim run and parse the SSE response, invoking onEvent per event.
 export async function runClaim(
   body: { claimKey?: string; evidence?: string },
   onEvent: (e: StreamEvent) => void,
 ): Promise<void> {
-  const res = await fetch("/api/claim/run", {
+  const res = await fetch(runUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

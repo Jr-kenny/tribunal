@@ -32,7 +32,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     if (claim.status !== "Open") {
       const reads = await Promise.all(
         FACETS.map(async (f: (typeof FACETS)[number]) => {
-          const v = f.judge ? await readVerdictMaybe(f.judge, String(claimId), f.genlayerKey) : null;
+          const v = f.judge ? await readVerdictMaybe(f.judge, String(claimId), f.key) : null;
           return v ? { facet: f.key, name: f.key, color: "", critical: f.critical, vote: v.vote, confidence: v.confidence, reason: v.reason } : null;
         }),
       );

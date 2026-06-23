@@ -298,16 +298,20 @@ All secrets and endpoints come from the environment, never inlined. See [orchest
 
 | Variable | Used by | Notes |
 |----------|---------|-------|
-| `CASPER_NODE_URL` | orchestrator | the node the relay submits through (points at the local proxy, e.g. `http://127.0.0.1:7777/rpc`) |
+| `CASPER_NODE_URL` | orchestrator | the node the relay submits through (the proxy: `http://127.0.0.1:7777/rpc` locally, or `https://<proxy-host>/rpc?k=<token>` when the proxy is hosted elsewhere) |
 | `CASPER_NETWORK` | orchestrator | `casper-test` |
-| `CASPER_SECRET_KEY` | orchestrator | admin / deployer key path (signs open, finalize, resolve) |
+| `CASPER_SECRET_KEY` | orchestrator | admin / deployer key (signs open, finalize, resolve): a file path locally, or the PEM contents in the cloud |
+| `CASPER_JUDGE_{AUTHENTICITY,SOLVENCY,CUSTODIAN,VALUATION}` | orchestrator | each judge's own Casper key, path or PEM contents; defaults to `../.keys/casper/judges/<facet>.pem` |
 | `CASPER_PUBLIC_NODE_URL` | solvency judge | a public no-auth Casper node the GenLayer validators can reach to read the reserve balance |
 | `TRIBUNAL_CONTRACT_HASH` | orchestrator | deployed package hash |
 | `CSPR_CLOUD_KEY` | proxy | CSPR.cloud API key the bridge injects |
 | `GENLAYER_NETWORK` | orchestrator | `localnet` \| `studionet` \| `testnet-asimov` \| `testnet-bradbury` |
-| `GENLAYER_DEPLOYER_KEY` | orchestrator | GenLayer account that drives the judges |
+| `GENLAYER_DEPLOYER_KEY` | orchestrator | GenLayer account that drives the judges: a file path locally, or the `0x…` key in the cloud |
+| `GENLAYER_JUDGE_{AUTHENTICITY,SOLVENCY,CUSTODIAN,VALUATION}` | orchestrator | each judge's own GenLayer account, path or `0x…` key; defaults to `../.keys/genlayer/judges/<facet>.key` |
 | `GENLAYER_{AUTHENTICITY,SOLVENCY,CUSTODIAN,VALUATION}_JUDGE` | orchestrator | the four deployed judge addresses |
 | `PROXY_PORT`, `CASPER_UPSTREAM` | proxy | bridge listen port and upstream node |
+| `PROXY_HOST` | proxy | interface to bind; defaults to `127.0.0.1` (local only). Set `0.0.0.0` when hosting the proxy separately |
+| `PROXY_AUTH_TOKEN` | proxy | shared secret required as `?k=<token>` once the proxy is public; unset = open (local dev) |
 
 ## Tech stack
 

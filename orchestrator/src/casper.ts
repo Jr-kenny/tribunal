@@ -4,13 +4,13 @@
 // The Vote enum encodes on the wire as a single U8 discriminant
 // (Pass=0, Fail=1, Uncertain=2), confirmed from the cargo-odra contract schema.
 
-import { readFileSync } from "node:fs";
 // casper-js-sdk is CJS. tsx exposes it as a default export; the Next bundler
 // exposes it as the namespace. Take whichever is present so both work.
 import * as CasperNS from "casper-js-sdk";
 import type { PrivateKey, RpcClient, Args } from "casper-js-sdk";
 const C: typeof import("casper-js-sdk") = (CasperNS as any).default ?? CasperNS;
 import { config } from "./config.js";
+import { casperKeyPem } from "./keys.js";
 import type { Vote } from "./genlayer.js";
 
 const VOTE_DISCRIMINANT: Record<Vote, number> = { PASS: 0, FAIL: 1, UNCERTAIN: 2 };
@@ -18,10 +18,10 @@ const VOTE_DISCRIMINANT: Record<Vote, number> = { PASS: 0, FAIL: 1, UNCERTAIN: 2
 // generous per-call gas, well under the block gas limit (installs ran ~hundreds of CSPR)
 const CALL_PAYMENT = 6_000_000_000;
 
-function loadKey(keyPath: string = config.casperSecretKeyPath): PrivateKey {
-  if (!keyPath) throw new Error("Missing Casper key path");
-  const pem = readFileSync(keyPath, "utf8");
-  return C.PrivateKey.fromPem(pem, C.KeyAlgorithm.ED25519);
+// keyId is "deployer" or a facet ("authenticity"…"valuation"); resolved from env
+// (cloud) or the local key file.
+function loadKey(keyId: string = "deployer"): PrivateKey {
+  return C.PrivateKey.fromPem(casperKeyPem(keyId), C.KeyAlgorithm.ED25519);
 }
 
 function rpc(): RpcClient {
@@ -33,8 +33,8 @@ function packageHashHex(): string {
   return config.tribunalContractHash.replace(/^hash-/, "");
 }
 
-async function call(entryPoint: string, args: Args, keyPath?: string): Promise<string> {
-  const key = loadKey(keyPath);
+async function call(entryPoint: string, args: Args, keyId?: string): Promise<string> {
+  const key = loadKey(keyId);
   const tx = new C.ContractCallBuilder()
     .byPackageHash(packageHashHex())
     .entryPoint(entryPoint)
@@ -58,14 +58,14 @@ export async function openClaimWithEvidence(
   asset: string,
   evidenceUri: string,
   evidenceHash: string,
-  keyPath?: string,
+  keyId?: string,
 ): Promise<string> {
   const args = C.Args.fromMap({
     asset: C.CLValue.newCLString(asset),
     evidence_uri: C.CLValue.newCLString(evidenceUri),
     evidence_hash: C.CLValue.newCLString(evidenceHash),
   });
-  return call("open_claim_with_evidence", args, keyPath);
+  return call("open_claim_with_evidence", args, keyId);
 }
 
 /** Submit a facet verdict carrying the GenLayer tx hash as proof. */
@@ -75,7 +75,7 @@ export async function submitVerdict(
   vote: Vote,
   confidenceBps: number,
   genlayerProof: string,
-  judgeKeyPath?: string,
+  judgeKeyId?: string,
 ): Promise<string> {
   const args = C.Args.fromMap({
     claim_id: C.CLValue.newCLUint64(claimId),
@@ -85,7 +85,7 @@ export async function submitVerdict(
     genlayer_proof: C.CLValue.newCLString(genlayerProof),
   });
   // signed by the facet's own judge key so reputation accrues per judge
-  return call("submit_verdict", args, judgeKeyPath);
+  return call("submit_verdict", args, judgeKeyId);
 }
 
 /** Federate the submitted verdicts into the on-chain outcome. */

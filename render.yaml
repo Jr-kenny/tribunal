@@ -1,0 +1,66 @@
+# Render blueprint for the Tribunal orchestrator service.
+#
+# Hosts the long-running work the Vercel UI can't (a panel run takes minutes,
+# past Vercel Hobby's 60s function cap): the SSE panel run and the on-chain
+# claim submit, with the CSPR.cloud bridge running in-process on localhost so it
+# never has to be public. The Vercel UI points NEXT_PUBLIC_ORCHESTRATOR_URL at
+# this service's URL.
+#
+# Secrets (sync: false) are set in the Render dashboard, not committed. The key
+# vars hold the key *contents* here (no filesystem), per orchestrator/src/keys.ts.
+services:
+  - type: web
+    name: tribunal-orchestrator
+    runtime: node
+    rootDir: orchestrator
+    buildCommand: npm install
+    startCommand: npm run serve
+    envVars:
+      # the orchestrator submits through the in-process bridge on localhost
+      - key: CASPER_NODE_URL
+        value: http://127.0.0.1:7777/rpc
+      - key: PROXY_PORT
+        value: "7777"
+      - key: CASPER_NETWORK
+        value: casper-test
+      # public no-auth node the GenLayer solvency judge reads the reserve from
+      - key: CASPER_PUBLIC_NODE_URL
+        value: https://node.testnet.casper.network/rpc
+      - key: GENLAYER_NETWORK
+        value: studionet
+      # the Vercel origin allowed to call this service (set to your deployed URL)
+      - key: ALLOWED_ORIGIN
+        sync: false
+      # secrets and deployment-specific values, set in the dashboard
+      - key: CSPR_CLOUD_KEY
+        sync: false
+      - key: TRIBUNAL_CONTRACT_HASH
+        sync: false
+      - key: CASPER_SECRET_KEY # deployer PEM contents
+        sync: false
+      - key: CASPER_JUDGE_AUTHENTICITY
+        sync: false
+      - key: CASPER_JUDGE_SOLVENCY
+        sync: false
+      - key: CASPER_JUDGE_CUSTODIAN
+        sync: false
+      - key: CASPER_JUDGE_VALUATION
+        sync: false
+      - key: GENLAYER_DEPLOYER_KEY # 0x… contents
+        sync: false
+      - key: GENLAYER_JUDGE_AUTHENTICITY
+        sync: false
+      - key: GENLAYER_JUDGE_SOLVENCY
+        sync: false
+      - key: GENLAYER_JUDGE_CUSTODIAN
+        sync: false
+      - key: GENLAYER_JUDGE_VALUATION
+        sync: false
+      - key: GENLAYER_AUTHENTICITY_JUDGE # deployed judge address
+        sync: false
+      - key: GENLAYER_SOLVENCY_JUDGE
+        sync: false
+      - key: GENLAYER_CUSTODIAN_JUDGE
+        sync: false
+      - key: GENLAYER_VALUATION_JUDGE
+        sync: false

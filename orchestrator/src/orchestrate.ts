@@ -16,11 +16,8 @@ export interface FacetSpec {
   facetId: number;
   critical: boolean;
   judge: string;
-  // this facet's own Casper key, so its verdict accrues reputation per judge
-  casperKey: string;
-  // this facet's own GenLayer account, so the four judges can run concurrently
-  // instead of sharing one account's nonce
-  genlayerKey: string;
+  // this facet's own Casper + GenLayer identity is keyed by `key` (see keys.ts),
+  // so its verdict accrues reputation per judge and the four can run concurrently
   // each facet that verifies external/on-chain truth fetches it under consensus first:
   readsReserve?: boolean; // solvency: reserve balance off Casper
   readsPrice?: boolean; // valuation: live market price
@@ -29,13 +26,11 @@ export interface FacetSpec {
 }
 
 // facet ids match the Tribunal contract's configured ids (see judges/rubrics.py)
-const JUDGE_KEY = (facet: string) => `../.keys/casper/judges/${facet}.pem`;
-const GL_KEY = (facet: string) => `../.keys/genlayer/judges/${facet}.key`;
 export const FACETS: FacetSpec[] = [
-  { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge, casperKey: JUDGE_KEY("authenticity"), genlayerKey: GL_KEY("authenticity"), readsAttestation: true },
-  { key: "solvency", facetId: 2, critical: true, judge: config.genlayerSolvencyJudge, casperKey: JUDGE_KEY("solvency"), genlayerKey: GL_KEY("solvency"), readsReserve: true },
-  { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge, casperKey: JUDGE_KEY("custodian"), genlayerKey: GL_KEY("custodian"), readsCustodian: true },
-  { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, casperKey: JUDGE_KEY("valuation"), genlayerKey: GL_KEY("valuation"), readsPrice: true },
+  { key: "authenticity", facetId: 1, critical: false, judge: config.genlayerAuthenticityJudge, readsAttestation: true },
+  { key: "solvency", facetId: 2, critical: true, judge: config.genlayerSolvencyJudge, readsReserve: true },
+  { key: "custodian", facetId: 3, critical: false, judge: config.genlayerCustodianJudge, readsCustodian: true },
+  { key: "valuation", facetId: 4, critical: false, judge: config.genlayerValuationJudge, readsPrice: true },
 ];
 
 // The four checks as general verification dimensions, used for any claim that
@@ -118,7 +113,7 @@ export async function judgeFacet(
     const wallet = JSON.parse(evidence).reserve_wallet as string | undefined;
     if (wallet) {
       console.log(`[${spec.key}] reading reserve wallet ${wallet} live from Casper...`);
-      const motes = await readReserve(spec.judge, String(claimId), config.casperPublicNodeUrl, wallet, spec.genlayerKey);
+      const motes = await readReserve(spec.judge, String(claimId), config.casperPublicNodeUrl, wallet, spec.key);
       console.log(`[${spec.key}] verified on-chain reserve: ${motes} motes (${motes / 1_000_000_000n} CSPR)`);
       onEvent({ type: "facet-fetched", facet: spec.key, detail: `reserve read live: ${motes / 1_000_000_000n} CSPR` });
     }
@@ -128,7 +123,7 @@ export async function judgeFacet(
     // coingecko id for the priced asset; defaults to CSPR for these claims
     const symbol = (JSON.parse(evidence).price_symbol as string | undefined) ?? "casper-network";
     console.log(`[${spec.key}] reading live market price for "${symbol}" under consensus...`);
-    const micro = await readPrice(spec.judge, String(claimId), symbol, spec.genlayerKey);
+    const micro = await readPrice(spec.judge, String(claimId), symbol, spec.key);
     console.log(`[${spec.key}] verified market price: $${(Number(micro) / 1_000_000).toFixed(6)} per unit`);
     onEvent({ type: "facet-fetched", facet: spec.key, detail: `market price read: $${(Number(micro) / 1_000_000).toFixed(6)}` });
   }
@@ -137,7 +132,7 @@ export async function judgeFacet(
     const name = JSON.parse(evidence).custodian as string | undefined;
     if (name) {
       console.log(`[${spec.key}] looking up custodian "${name}" under consensus...`);
-      const record = JSON.parse(await readCustodian(spec.judge, String(claimId), name, spec.genlayerKey));
+      const record = JSON.parse(await readCustodian(spec.judge, String(claimId), name, spec.key));
       console.log(`[${spec.key}] custodian record: ${record.found ? `found "${record.title}"` : "NO public record"}`);
       onEvent({ type: "facet-fetched", facet: spec.key, detail: record.found ? `resolved "${record.title}"` : "no public record found" });
     }
@@ -147,19 +142,19 @@ export async function judgeFacet(
     const ev = JSON.parse(evidence);
     if (ev.document_url && ev.document_sha256) {
       console.log(`[${spec.key}] fetching + hashing attestation document under consensus...`);
-      const result = JSON.parse(await readAttestation(spec.judge, String(claimId), ev.document_url, ev.document_sha256, spec.genlayerKey));
+      const result = JSON.parse(await readAttestation(spec.judge, String(claimId), ev.document_url, ev.document_sha256, spec.key));
       console.log(`[${spec.key}] document integrity: ${result.match ? "SHA-256 matches" : "SHA-256 MISMATCH"}`);
       onEvent({ type: "facet-fetched", facet: spec.key, detail: result.match ? "SHA-256 matches" : "SHA-256 mismatch" });
     }
   }
 
   console.log(`[${spec.key}] running GenLayer judge on claim ${claimId}...`);
-  const genlayerTx = await runJudge(spec.judge, String(claimId), evidence, spec.genlayerKey);
-  const verdict = await readVerdict(spec.judge, String(claimId), spec.genlayerKey);
+  const genlayerTx = await runJudge(spec.judge, String(claimId), evidence, spec.key);
+  const verdict = await readVerdict(spec.judge, String(claimId), spec.key);
   console.log(`[${spec.key}] ${verdict.vote} @ ${verdict.confidence}bps - ${verdict.reason}`);
   onEvent({ type: "facet-verdict", facet: spec.key, vote: verdict.vote, confidence: verdict.confidence, reason: verdict.reason, genlayerTx });
 
-  const submitTx = await submitVerdict(claimId, spec.facetId, verdict.vote, verdict.confidence, genlayerTx, spec.casperKey);
+  const submitTx = await submitVerdict(claimId, spec.facetId, verdict.vote, verdict.confidence, genlayerTx, spec.key);
   console.log(`[${spec.key}] submitted to Casper (own key), tx ${submitTx}`);
   onEvent({ type: "facet-submitted", facet: spec.key, submitTx });
 
@@ -186,11 +181,11 @@ export async function judgeFacetGeneric(
   onEvent({ type: "facet-started", facet: spec.key });
   const q = GENERAL_QUESTIONS[spec.key];
   console.log(`[${spec.key}] judging "${q.facetName}" (generic) on claim ${claimId}...`);
-  const genlayerTx = await runJudgeWithRubric(spec.judge, String(claimId), evidence, q.facetName, q.rubric, spec.genlayerKey);
-  const verdict = await readVerdict(spec.judge, String(claimId), spec.genlayerKey);
+  const genlayerTx = await runJudgeWithRubric(spec.judge, String(claimId), evidence, q.facetName, q.rubric, spec.key);
+  const verdict = await readVerdict(spec.judge, String(claimId), spec.key);
   console.log(`[${spec.key}] ${verdict.vote} @ ${verdict.confidence}bps - ${verdict.reason}`);
   onEvent({ type: "facet-verdict", facet: spec.key, vote: verdict.vote, confidence: verdict.confidence, reason: verdict.reason, genlayerTx });
-  const submitTx = await submitVerdict(claimId, spec.facetId, verdict.vote, verdict.confidence, genlayerTx, spec.casperKey);
+  const submitTx = await submitVerdict(claimId, spec.facetId, verdict.vote, verdict.confidence, genlayerTx, spec.key);
   onEvent({ type: "facet-submitted", facet: spec.key, submitTx });
   return { facet: spec.key, facetId: spec.facetId, genlayerTx, vote: verdict.vote, confidence: verdict.confidence, reason: verdict.reason, submitTx };
 }

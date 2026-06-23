@@ -16,17 +16,21 @@
 
 import http from "node:http";
 import https from "node:https";
-import { URL } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import "dotenv/config";
 
 const TOKEN = process.env.CSPR_CLOUD_KEY ?? "";
 const PORT = Number(process.env.PROXY_PORT ?? 7777);
+// Bind localhost by default so local dev never exposes the bridge. When the
+// proxy runs on its own host (Vercel can't reach 127.0.0.1), set PROXY_HOST=0.0.0.0.
+const HOST = process.env.PROXY_HOST ?? "127.0.0.1";
+// When exposed publicly the proxy is an open relay to CSPR.cloud under our key,
+// so gate it with a shared secret. casper-js-sdk can't send custom headers
+// (the reason this bridge exists), so the secret rides in the URL as ?k=… and
+// callers point CASPER_NODE_URL at https://<host>/rpc?k=<token>. Unset = open,
+// for frictionless local dev.
+const AUTH = process.env.PROXY_AUTH_TOKEN ?? "";
 const UPSTREAM = new URL(process.env.CASPER_UPSTREAM ?? "https://node.testnet.cspr.cloud/rpc");
-
-if (!TOKEN) {
-  console.error("CSPR_CLOUD_KEY is required");
-  process.exit(1);
-}
 
 // Hashes captured from put_transaction responses, awaiting a processed-confirmation.
 const pending = new Set<string>();
@@ -162,13 +166,40 @@ function handleEvents(req: http.IncomingMessage, res: http.ServerResponse) {
   req.on("close", () => clearInterval(tick));
 }
 
-const server = http.createServer((req, res) => {
-  if (req.method === "GET" && (req.url ?? "").startsWith("/events")) {
-    return handleEvents(req, res);
-  }
-  return handleRpc(req, res);
-});
+// Constant-time-ish check of the ?k= secret against PROXY_AUTH_TOKEN.
+function authed(req: http.IncomingMessage): boolean {
+  if (!AUTH) return true; // open when no token configured (local dev)
+  const k = new URL(req.url ?? "", "http://x").searchParams.get("k") ?? "";
+  if (k.length !== AUTH.length) return false;
+  let diff = 0;
+  for (let i = 0; i < AUTH.length; i += 1) diff |= k.charCodeAt(i) ^ AUTH.charCodeAt(i);
+  return diff === 0;
+}
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`CSPR.cloud bridge: http://127.0.0.1:${PORT}/rpc (+ /events SSE) -> ${UPSTREAM.href}`);
-});
+// Start the bridge. Called directly when run as a CLI (npx tsx src/proxy.ts), or
+// in-process by the Render server so the proxy stays private on localhost.
+export function startProxy(): http.Server {
+  if (!TOKEN) throw new Error("CSPR_CLOUD_KEY is required");
+  const server = http.createServer((req, res) => {
+    if (!authed(req)) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "unauthorized" }));
+    }
+    if (req.method === "GET" && (req.url ?? "").startsWith("/events")) {
+      return handleEvents(req, res);
+    }
+    return handleRpc(req, res);
+  });
+  server.listen(PORT, HOST, () => {
+    console.log(`CSPR.cloud bridge: http://${HOST}:${PORT}/rpc (+ /events SSE) -> ${UPSTREAM.href}`);
+    if (HOST !== "127.0.0.1" && !AUTH) {
+      console.warn("[bridge] bound to a public interface with no PROXY_AUTH_TOKEN set; it's an open relay to CSPR.cloud under your key. Set PROXY_AUTH_TOKEN before exposing it.");
+    }
+  });
+  return server;
+}
+
+// Run standalone when invoked directly, but not when imported by the server.
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  startProxy();
+}

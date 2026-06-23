@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "serve": "tsx src/server.ts",
+    "proxy": "tsx src/proxy.ts"
   },
   "dependencies": {
     "casper-js-sdk": "^5.0.12",
