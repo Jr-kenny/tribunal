@@ -12,6 +12,7 @@ services:
   - type: web
     name: tribunal-orchestrator
     runtime: node
+    plan: free
     rootDir: orchestrator
     buildCommand: npm install
     startCommand: npm run serve
