@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 import { readClaimEvents, type ClaimRecord } from "./events.js";
 import { relayPanel } from "./orchestrate.js";
 
-const POLL_MS = Number(process.env.WATCHER_POLL_MS ?? 15000);
+// Check for filed-but-unjudged claims every minute by default, so a claim the
+// feeder just filed gets judged shortly after (override with WATCHER_POLL_MS, ms).
+const POLL_MS = Number(process.env.WATCHER_POLL_MS ?? 60_000);
 
 // claims currently being judged this run, so a slow judge run isn't picked up
 // again by the next poll before it finalizes

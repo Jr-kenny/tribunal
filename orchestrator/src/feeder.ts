@@ -14,7 +14,8 @@ import { readClaimEvents } from "./events.js";
 import { openClaimWithEvidence } from "./casper.js";
 import { confirm, claimIdFromOpen } from "./chainread.js";
 
-const POLL_MS = Number(process.env.FEEDER_POLL_MS ?? 60000);
+// Search for new claims hourly by default (override with FEEDER_POLL_MS, in ms).
+const POLL_MS = Number(process.env.FEEDER_POLL_MS ?? 3_600_000);
 
 interface Source {
   asset: string;
