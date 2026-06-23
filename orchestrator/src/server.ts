@@ -25,8 +25,19 @@ import { relayPanel } from "./orchestrate.js";
 import { confirm, claimIdFromOpen, statusFromDiff } from "./chainread.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? "*";
+// ALLOWED_ORIGIN is a comma-separated list of the site origins allowed to call
+// this service (a project can serve several Vercel aliases). We echo back the
+// caller's origin when it's on the list, which is what a browser's CORS check
+// needs. "*" allows any origin.
+const ALLOWED = (process.env.ALLOWED_ORIGIN ?? "*").split(",").map((s) => s.trim()).filter(Boolean);
 const EXAMPLES_DIR = fileURLToPath(new URL("../examples/", import.meta.url));
+
+function allowOrigin(req: http.IncomingMessage): string {
+  if (ALLOWED.includes("*")) return "*";
+  const origin = req.headers.origin;
+  if (origin && ALLOWED.includes(origin)) return origin;
+  return ALLOWED[0] ?? "*";
+}
 
 const EXAMPLES: Record<string, string> = {
   "claim-backed": "claim-backed.json",
@@ -34,9 +45,10 @@ const EXAMPLES: Record<string, string> = {
   "claim-lying": "claim-lying.json",
 };
 
-function corsHeaders(extra: Record<string, string> = {}): Record<string, string> {
+function corsHeaders(req: http.IncomingMessage, extra: Record<string, string> = {}): Record<string, string> {
   return {
-    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+    "Access-Control-Allow-Origin": allowOrigin(req),
+    "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     ...extra,
@@ -52,8 +64,8 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
-function json(res: http.ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, corsHeaders({ "Content-Type": "application/json" }));
+function json(req: http.IncomingMessage, res: http.ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, corsHeaders(req, { "Content-Type": "application/json" }));
   res.end(JSON.stringify(body));
 }
 
@@ -70,10 +82,10 @@ async function handleRun(req: http.IncomingMessage, res: http.ServerResponse): P
   try {
     evidence = loadEvidence(JSON.parse((await readBody(req)) || "{}"));
   } catch (e) {
-    return json(res, 400, { error: (e as Error).message });
+    return json(req, res, 400, { error: (e as Error).message });
   }
 
-  res.writeHead(200, corsHeaders({
+  res.writeHead(200, corsHeaders(req, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
@@ -105,9 +117,9 @@ async function handleSubmit(req: http.IncomingMessage, res: http.ServerResponse)
   try {
     ({ asset, evidenceUrl } = JSON.parse((await readBody(req)) || "{}"));
   } catch {
-    return json(res, 400, { error: "invalid JSON body" });
+    return json(req, res, 400, { error: "invalid JSON body" });
   }
-  if (!asset || !evidenceUrl) return json(res, 400, { error: "asset and evidenceUrl are required" });
+  if (!asset || !evidenceUrl) return json(req, res, 400, { error: "asset and evidenceUrl are required" });
 
   let text: string;
   try {
@@ -115,12 +127,12 @@ async function handleSubmit(req: http.IncomingMessage, res: http.ServerResponse)
     if (!r.ok) throw new Error(`evidence URL returned ${r.status}`);
     text = await r.text();
   } catch (e) {
-    return json(res, 400, { error: `couldn't fetch the evidence URL: ${(e as Error).message}` });
+    return json(req, res, 400, { error: `couldn't fetch the evidence URL: ${(e as Error).message}` });
   }
   try {
     JSON.parse(text);
   } catch {
-    return json(res, 400, { error: "the evidence URL must serve JSON" });
+    return json(req, res, 400, { error: "the evidence URL must serve JSON" });
   }
 
   try {
@@ -128,9 +140,9 @@ async function handleSubmit(req: http.IncomingMessage, res: http.ServerResponse)
     const tx = await openClaimWithEvidence(asset, evidenceUrl, hash);
     const info = await confirm(tx);
     const claimId = claimIdFromOpen(info);
-    return json(res, 200, { claimId, tx });
+    return json(req, res, 200, { claimId, tx });
   } catch (e) {
-    return json(res, 500, { error: (e as Error).message ?? "failed to register claim" });
+    return json(req, res, 500, { error: (e as Error).message ?? "failed to register claim" });
   }
 }
 
@@ -140,13 +152,13 @@ startProxy();
 const server = http.createServer((req, res) => {
   const url = req.url ?? "";
   if (req.method === "OPTIONS") {
-    res.writeHead(204, corsHeaders());
+    res.writeHead(204, corsHeaders(req));
     return res.end();
   }
-  if (req.method === "GET" && url.startsWith("/health")) return json(res, 200, { ok: true });
+  if (req.method === "GET" && url.startsWith("/health")) return json(req, res, 200, { ok: true });
   if (req.method === "POST" && url.startsWith("/claim/run")) return void handleRun(req, res);
   if (req.method === "POST" && url.startsWith("/claim/submit")) return void handleSubmit(req, res);
-  return json(res, 404, { error: "not found" });
+  return json(req, res, 404, { error: "not found" });
 });
 
 server.listen(PORT, "0.0.0.0", () => {
