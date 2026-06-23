@@ -9,6 +9,7 @@
 
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { readClaimEvents } from "./events.js";
 import { openClaimWithEvidence } from "./casper.js";
 import { confirm, claimIdFromOpen } from "./chainread.js";
@@ -49,10 +50,15 @@ async function tick(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
-  console.log(`[feeder] watching ${sources().length} source(s) for new claims (every ${POLL_MS / 1000}s). Ctrl-C to stop.`);
+// Start the feeder loop. Called directly as a CLI, or in-process by the server
+// (RUN_FEEDER=1) so sources are filed onto the registry without a separate host.
+export async function startFeeder(): Promise<void> {
+  console.log(`[feeder] watching ${sources().length} source(s) for new claims (every ${POLL_MS / 1000}s).`);
   await tick();
   setInterval(tick, POLL_MS);
 }
 
-main();
+// Run standalone when invoked directly, but not when imported by the server.
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  startFeeder();
+}

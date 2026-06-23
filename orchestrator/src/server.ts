@@ -20,6 +20,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import "dotenv/config";
 import { startProxy } from "./proxy.js";
+import { startWatcher } from "./watcher.js";
+import { startFeeder } from "./feeder.js";
 import { openClaim, openClaimWithEvidence } from "./casper.js";
 import { relayPanel } from "./orchestrate.js";
 import { confirm, claimIdFromOpen, statusFromDiff } from "./chainread.js";
@@ -148,6 +150,18 @@ async function handleSubmit(req: http.IncomingMessage, res: http.ServerResponse)
 
 // The bridge runs here so Casper writes get their CSPR.cloud header on localhost.
 startProxy();
+
+// Render's free tier has no background workers, so the autonomous loop runs in
+// this same process when enabled: the feeder files claims from its sources, the
+// watcher judges any registered-but-unjudged claim and finalizes it. Each judged
+// claim spends real testnet CSPR + GenLayer + CSPR.cloud quota, so it's opt-in
+// per env flag rather than always on.
+if (process.env.RUN_FEEDER === "1") {
+  startFeeder().catch((e) => console.error("[feeder] failed to start:", e));
+}
+if (process.env.RUN_WATCHER === "1") {
+  startWatcher().catch((e) => console.error("[watcher] failed to start:", e));
+}
 
 const server = http.createServer((req, res) => {
   const url = req.url ?? "";

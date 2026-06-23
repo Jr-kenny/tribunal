@@ -1,6 +1,6 @@
 [
   {
     "asset": "Verra VCS-1234 carbon credit retirement",
-    "url": "http://localhost:3000/claims/claim-carbon.json"
+    "url": "https://tribunal-red.vercel.app/claims/claim-carbon.json"
   }
 ]

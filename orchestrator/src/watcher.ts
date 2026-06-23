@@ -9,6 +9,7 @@
 // Run (proxy up, from orchestrator/):  npx tsx src/watcher.ts
 
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { readClaimEvents, type ClaimRecord } from "./events.js";
 import { relayPanel } from "./orchestrate.js";
 
@@ -70,10 +71,15 @@ async function tick(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
-  console.log(`[watcher] watching the registry for new claims (every ${POLL_MS / 1000}s). Ctrl-C to stop.`);
+// Start the watcher loop. Called directly as a CLI, or in-process by the server
+// (RUN_WATCHER=1) so the registry is judged autonomously without a separate host.
+export async function startWatcher(): Promise<void> {
+  console.log(`[watcher] watching the registry for new claims (every ${POLL_MS / 1000}s).`);
   await tick();
   setInterval(tick, POLL_MS);
 }
 
-main();
+// Run standalone when invoked directly, but not when imported by the server.
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  startWatcher();
+}
